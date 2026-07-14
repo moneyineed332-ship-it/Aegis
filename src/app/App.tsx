@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { activateEmergencyStop, getDashboard, getSupervisor, postApi, refreshFearGreed, refreshFundingRates, refreshHistory, refreshMarketData, refreshOpenInterest, resumeSupervisor, runDonchianWalkForward, runGridWalkForward, runMeanReversionWalkForward, runSmaWalkForward, type DashboardSnapshot, type SupervisorStatus } from "../lib/api";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { activateEmergencyStop, getDashboard, getSupervisor, postApi, refreshFearGreed, refreshFundingRates, refreshHistory, refreshMarketData, refreshOpenInterest, resumeSupervisor, runDonchianWalkForward, runGridWalkForward, runMeanReversionWalkForward, runSmaWalkForward, trainMLRegime, predictRegime, getMLRegimeSummary, checkAlerts, getAlertHistory, runAdvancedWalkForward, runMonteCarlo, runSensitivity, getBinanceTestnetStatus, getBinanceTestnetPrice, getAssetClasses, getCommodityPrices, getForexRates, type DashboardSnapshot, type SupervisorStatus, type Alert, type MLRegimeSummary } from "../lib/api";
 import {
   Activity,
   AlertTriangle,
@@ -1322,6 +1322,604 @@ function OperationsSection() {
   );
 }
 
+function MLRegimeSection() {
+  const [summary, setSummary] = useState<MLRegimeSummary | null>(null);
+  const [prediction, setPrediction] = useState<any>(null);
+  const [training, setTraining] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getMLRegimeSummary().then(setSummary).catch(() => {});
+    void predictRegime().then(setPrediction).catch(() => {});
+  }, []);
+
+  const handleTrain = async () => {
+    setTraining(true);
+    setError(null);
+    try {
+      await trainMLRegime();
+      const newSummary = await getMLRegimeSummary();
+      setSummary(newSummary);
+      const newPrediction = await predictRegime();
+      setPrediction(newPrediction);
+    } catch {
+      setError("Entraînement échoué — données insuffisantes");
+    } finally {
+      setTraining(false);
+    }
+  };
+
+  const regimeColors: Record<string, string> = {
+    bull_trend: "#22c55e", bear_trend: "#ef4444", range: "#f59e0b",
+    high_volatility: "#f97316", low_volatility: "#06b6d4",
+    capitulation: "#dc2626", euphoria: "#a855f7",
+  };
+
+  return (
+    <section className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
+          <div>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">08 — ML RÉGIME</div>
+            <h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">Prédiction <span className="text-primary">Machine Learning</span></h2>
+          </div>
+          <button onClick={handleTrain} disabled={training} className="px-4 py-2 font-['JetBrains_Mono'] text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
+            {training ? "ENTRAÎNEMENT…" : "ENTRAÎNER LE MODÈLE"}
+          </button>
+        </div>
+
+        {error && <div className="mb-4 p-3 border border-red-400/30 bg-red-400/5 font-['JetBrains_Mono'] text-xs text-red-400">{error}</div>}
+
+        <div className="grid lg:grid-cols-3 gap-4">
+          {/* Model Status */}
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">MODÈLE</div>
+            <div className="flex items-center gap-2 mb-3">
+              <span className={`w-2 h-2 rounded-full ${summary?.trained ? "bg-green-400" : "bg-muted-foreground/30"}`} />
+              <span className="font-['Inter'] text-sm text-foreground">{summary?.trained ? "Entraîné" : "Non entraîné"}</span>
+            </div>
+            <div className="space-y-2 font-['JetBrains_Mono'] text-xs text-muted-foreground">
+              <div>Features: {summary?.n_features ?? 0}</div>
+              <div>Classes: {summary?.n_classes ?? 0}</div>
+              <div>Nom: {summary?.feature_names?.join(", ") ?? "—"}</div>
+            </div>
+          </div>
+
+          {/* Current Prediction */}
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">PRÉDICTION ACTUELLE</div>
+            {prediction?.ml_prediction ? (
+              <div>
+                <div className="font-['Rajdhani'] text-3xl font-700 mb-2" style={{ color: regimeColors[prediction.ml_prediction.regime] ?? "#00d4ff" }}>
+                  {prediction.ml_prediction.regime?.replace("_", " ").toUpperCase() ?? "N/A"}
+                </div>
+                <div className="font-['JetBrains_Mono'] text-xs text-muted-foreground mb-3">
+                  Confiance: {(prediction.ml_prediction.confidence * 100).toFixed(1)}%
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground">Rule-based:</span>
+                  <span className="font-['JetBrains_Mono'] text-xs" style={{ color: regimeColors[prediction.rule_based?.regime] ?? "#6b7fa3" }}>
+                    {prediction.rule_based?.regime?.replace("_", " ").toUpperCase() ?? "N/A"}
+                  </span>
+                  {prediction.agreement ? (
+                    <span className="font-['JetBrains_Mono'] text-xs text-green-400">✓ Accord</span>
+                  ) : (
+                    <span className="font-['JetBrains_Mono'] text-xs text-yellow-400">✗ Différent</span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="font-['Inter'] text-xs text-muted-foreground/50">Pas de prédiction</div>
+            )}
+          </div>
+
+          {/* Feature Importance */}
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">FEATURE IMPORTANCE</div>
+            {summary?.feature_importance && Object.keys(summary.feature_importance).length > 0 ? (
+              <div className="space-y-2">
+                {Object.entries(summary.feature_importance)
+                  .sort(([, a], [, b]) => b - a)
+                  .slice(0, 6)
+                  .map(([name, value]) => (
+                    <div key={name} className="flex items-center gap-2">
+                      <span className="font-['JetBrains_Mono'] text-xs text-foreground w-20 truncate">{name}</span>
+                      <div className="flex-1 h-1.5 rounded-full" style={{ background: "rgba(0,212,255,0.1)" }}>
+                        <div className="h-full rounded-full transition-all" style={{ width: `${value * 100}%`, background: "#00d4ff" }} />
+                      </div>
+                      <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground w-10 text-right">{(value * 100).toFixed(0)}%</span>
+                    </div>
+                  ))}
+              </div>
+            ) : (
+              <div className="font-['Inter'] text-xs text-muted-foreground/50">Entraîner le modèle d'abord</div>
+            )}
+          </div>
+        </div>
+
+        {/* Probability Distribution */}
+        {prediction?.ml_prediction?.probabilities && (
+          <div className="border border-border p-5 mt-4" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">DISTRIBUTION DES PROBABILITÉS</div>
+            <div className="grid grid-cols-7 gap-2">
+              {Object.entries(prediction.ml_prediction.probabilities).map(([regime, prob]) => (
+                <div key={regime} className="text-center">
+                  <div className="h-24 relative mx-auto w-full" style={{ background: "rgba(0,212,255,0.06)", border: "1px solid rgba(0,212,255,0.12)" }}>
+                    <div className="absolute bottom-0 left-0 right-0 transition-all" style={{ height: `${(prob as number) * 100}%`, background: regimeColors[regime] ?? "#00d4ff", opacity: 0.7 }} />
+                    <div className="absolute inset-0 flex items-center justify-center font-['JetBrains_Mono'] text-xs text-foreground z-10">{((prob as number) * 100).toFixed(0)}%</div>
+                  </div>
+                  <div className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground mt-1 truncate">{regime.replace("_", " ")}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AlertsSection() {
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [thresholds, setThresholds] = useState<Record<string, number>>({});
+  const [liveAlerts, setLiveAlerts] = useState<Array<{ type: string; message: string; timestamp: string }>>([]);
+  const [checking, setChecking] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    void getAlertHistory().then(setAlerts).catch(() => {});
+    void getAlertThresholds().then(setThresholds).catch(() => {});
+
+    try {
+      const ws = new WebSocket("ws://localhost:8000/ws/alerts");
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type !== "pong") {
+          setLiveAlerts((prev) => [data, ...prev].slice(0, 50));
+        }
+      };
+      ws.onerror = () => {};
+      wsRef.current = ws;
+      return () => ws.close();
+    } catch {
+      return () => {};
+    }
+  }, []);
+
+  const handleCheck = async () => {
+    setChecking(true);
+    try {
+      const result = await checkAlerts();
+      if (result.alerts) {
+        setLiveAlerts((prev) => [...result.alerts, ...prev].slice(0, 50));
+      }
+      const history = await getAlertHistory();
+      setAlerts(history);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const severityColors: Record<string, string> = {
+    critical: "#ef4444", warning: "#f59e0b", info: "#00d4ff",
+  };
+
+  return (
+    <section className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
+          <div>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">09 — ALERTES TEMPS RÉEL</div>
+            <h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">Monitoring <span className="text-primary">WebSocket</span></h2>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5 text-xs font-['JetBrains_Mono'] text-green-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />WS LIVE
+            </span>
+            <button onClick={handleCheck} disabled={checking} className="px-4 py-2 font-['JetBrains_Mono'] text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
+              {checking ? "VÉRIFICATION…" : "VÉRIFIER MAINTENANT"}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid lg:grid-cols-2 gap-4">
+          {/* Live Alerts Feed */}
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">FLUX TEMPS RÉEL</div>
+            {liveAlerts.length > 0 ? (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {liveAlerts.map((alert, i) => (
+                  <div key={i} className="flex items-start gap-2 p-2 border border-border/50">
+                    <span className="w-2 h-2 rounded-full shrink-0 mt-1" style={{ background: severityColors[alert.type?.split("_")[0] ?? "info"] ?? "#6b7fa3" }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-['JetBrains_Mono'] text-xs text-foreground truncate">{alert.message}</div>
+                      <div className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground">{alert.timestamp?.split("T")[1]?.split(".")[0] ?? ""}</div>
+                    </div>
+                    <span className="font-['JetBrains_Mono'] text-[10px] px-1.5 py-0.5" style={{ background: `${severityColors[alert.type?.split("_")[0] ?? "info"]}20`, color: severityColors[alert.type?.split("_")[0] ?? "info"] ?? "#6b7fa3" }}>
+                      {alert.type?.split("_")[0]?.toUpperCase() ?? "INFO"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="font-['Inter'] text-xs text-muted-foreground/50 py-8 text-center">En attente d'alertes…</div>
+            )}
+          </div>
+
+          {/* Thresholds */}
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">SEUILS DE DÉCLENCHEMENT</div>
+            <div className="space-y-2">
+              {Object.entries(thresholds).map(([key, value]) => (
+                <div key={key} className="flex items-center justify-between py-1.5 border-b border-border/30 last:border-0">
+                  <span className="font-['Inter'] text-xs text-foreground">{key.replace(/_/g, " ")}</span>
+                  <span className="font-['JetBrains_Mono'] text-xs text-primary">{typeof value === "boolean" ? (value ? "ON" : "OFF") : typeof value === "number" ? value.toLocaleString() : String(value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Alert History */}
+        {alerts.length > 0 && (
+          <div className="border border-border p-5 mt-4" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">HISTORIQUE ({alerts.length})</div>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-2">
+              {alerts.slice(0, 12).map((alert, i) => (
+                <div key={i} className="flex items-center gap-2 p-2 border border-border/30">
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: severityColors[alert.severity] ?? "#6b7fa3" }} />
+                  <span className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground truncate">{alert.message}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AdvancedBacktestSection() {
+  const [walkForward, setWalkForward] = useState<any>(null);
+  const [monteCarlo, setMonteCarlo] = useState<any>(null);
+  const [loading, setLoading] = useState<string | null>(null);
+
+  const handleWalkForward = async () => {
+    setLoading("wf");
+    try { setWalkForward(await runAdvancedWalkForward()); } finally { setLoading(null); }
+  };
+
+  const handleMonteCarlo = async () => {
+    setLoading("mc");
+    try { setMonteCarlo(await runMonteCarlo()); } finally { setLoading(null); }
+  };
+
+  return (
+    <section className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
+          <div>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">10 — BACKTEST AVANCÉ</div>
+            <h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">Walk-Forward & <span className="text-primary">Monte Carlo</span></h2>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={handleWalkForward} disabled={loading !== null} className="px-4 py-2 font-['JetBrains_Mono'] text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
+              {loading === "wf" ? "EN COURS…" : "WALK-FORWARD"}
+            </button>
+            <button onClick={handleMonteCarlo} disabled={loading !== null} className="px-4 py-2 font-['JetBrains_Mono'] text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
+              {loading === "mc" ? "EN COURS…" : "MONTE CARLO"}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid lg:grid-cols-2 gap-4">
+          {/* Walk-Forward */}
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">WALK-FORWARD OPTIMIZATION</div>
+            {walkForward ? (
+              <div>
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <div className="font-['Rajdhani'] text-xl font-700" style={{ color: walkForward.avg_oos_sharpe > 0 ? "#22c55e" : "#ef4444" }}>
+                      {walkForward.avg_oos_sharpe?.toFixed(2) ?? "—"}
+                    </div>
+                    <div className="font-['Inter'] text-[10px] text-muted-foreground">Sharpe moyen OOS</div>
+                  </div>
+                  <div>
+                    <div className="font-['Rajdhani'] text-xl font-700" style={{ color: walkForward.avg_oos_return > 0 ? "#22c55e" : "#ef4444" }}>
+                      {((walkForward.avg_oos_return ?? 0) * 100).toFixed(2)}%
+                    </div>
+                    <div className="font-['Inter'] text-[10px] text-muted-foreground">Rendement moyen OOS</div>
+                  </div>
+                  <div>
+                    <div className="font-['Rajdhani'] text-xl font-700 text-primary">{walkForward.robustness?.toUpperCase() ?? "—"}</div>
+                    <div className="font-['Inter'] text-[10px] text-muted-foreground">Robustesse</div>
+                  </div>
+                </div>
+                {walkForward.splits?.map((split: any) => (
+                  <div key={split.split} className="flex items-center justify-between py-1.5 border-b border-border/30">
+                    <span className="font-['JetBrains_Mono'] text-xs text-foreground">Split {split.split}</span>
+                    <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground">
+                      Sharpe: {split.oos_metrics?.sharpe_ratio?.toFixed(2) ?? "—"} · Return: {((split.oos_metrics?.total_return ?? 0) * 100).toFixed(2)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="font-['Inter'] text-xs text-muted-foreground/50 py-8 text-center">Cliquer Walk-Forward pour lancer</div>
+            )}
+          </div>
+
+          {/* Monte Carlo */}
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">MONTE CARLO SIMULATION</div>
+            {monteCarlo ? (
+              <div>
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <div className="font-['Rajdhani'] text-xl font-700" style={{ color: (monteCarlo.probability_of_profit ?? 0) > 0.5 ? "#22c55e" : "#ef4444" }}>
+                      {((monteCarlo.probability_of_profit ?? 0) * 100).toFixed(0)}%
+                    </div>
+                    <div className="font-['Inter'] text-[10px] text-muted-foreground">Prob. profit</div>
+                  </div>
+                  <div>
+                    <div className="font-['Rajdhani'] text-xl font-700" style={{ color: (monteCarlo.probability_of_ruin ?? 0) > 0.1 ? "#ef4444" : "#22c55e" }}>
+                      {((monteCarlo.probability_of_ruin ?? 0) * 100).toFixed(1)}%
+                    </div>
+                    <div className="font-['Inter'] text-[10px] text-muted-foreground">Prob. ruine</div>
+                  </div>
+                  <div>
+                    <div className="font-['Rajdhani'] text-xl font-700 text-primary">{monteCarlo.n_simulations?.toLocaleString() ?? "—"}</div>
+                    <div className="font-['Inter'] text-[10px] text-muted-foreground">Simulations</div>
+                  </div>
+                </div>
+                {monteCarlo.return_distribution?.percentiles && (
+                  <div className="mt-3">
+                    <div className="font-['JetBrains_Mono'] text-[10px] text-primary mb-2">DISTRIBUTION DES RETURNS</div>
+                    <div className="flex gap-1">
+                      {Object.entries(monteCarlo.return_distribution.percentiles).map(([p, val]) => (
+                        <div key={p} className="flex-1 text-center">
+                          <div className="h-12 relative mx-auto" style={{ background: "rgba(0,212,255,0.06)" }}>
+                            <div className="absolute bottom-0 left-0 right-0" style={{ height: `${Math.abs((val as number) * 500)}%`, background: (val as number) > 0 ? "#22c55e" : "#ef4444", opacity: 0.6 }} />
+                          </div>
+                          <div className="font-['JetBrains_Mono'] text-[9px] text-muted-foreground mt-1">{p}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="font-['Inter'] text-xs text-muted-foreground/50 py-8 text-center">Cliquer Monte Carlo pour lancer</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BinanceTestnetSection() {
+  const [status, setStatus] = useState<any>(null);
+  const [btcPrice, setBtcPrice] = useState<any>(null);
+
+  useEffect(() => {
+    void getBinanceTestnetStatus().then(setStatus).catch(() => {});
+    void getBinanceTestnetPrice().then(setBtcPrice).catch(() => {});
+  }, []);
+
+  return (
+    <section className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
+          <div>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">11 — BINANCE TESTNET</div>
+            <h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">Trading <span className="text-primary">Testnet</span></h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${status?.connected ? "bg-green-400" : "bg-red-400"}`} />
+            <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground">{status?.connected ? "CONNECTÉ" : "DÉCONNECTÉ"}</span>
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-3">CONNECTION</div>
+            <div className="space-y-2 font-['JetBrains_Mono'] text-xs">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Status</span>
+                <span className={status?.connected ? "text-green-400" : "text-red-400"}>{status?.connected ? "OK" : "ERROR"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Testnet</span>
+                <span className="text-foreground">{status?.testnet ? "OUI" : "NON"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Clés API</span>
+                <span className={status?.has_keys ? "text-green-400" : "text-yellow-400"}>{status?.has_keys ? "CONFIGURÉES" : "MANQUANTES"}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-3">PRIX BTC</div>
+            {btcPrice?.price ? (
+              <div className="font-['Rajdhani'] text-3xl font-700 text-foreground">
+                ${parseFloat(btcPrice.price).toLocaleString("fr-FR", { maximumFractionDigits: 0 })}
+              </div>
+            ) : (
+              <div className="font-['Inter'] text-xs text-muted-foreground/50">Indisponible</div>
+            )}
+            <div className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground mt-2">Source: Binance Testnet</div>
+          </div>
+
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-3">INFO</div>
+            <div className="font-['Inter'] text-xs text-muted-foreground leading-relaxed">
+              Le testnet Binance permet de trader sans risque. Configurez vos clés API testnet dans les variables d'environnement :
+            </div>
+            <div className="mt-2 font-['JetBrains_Mono'] text-[10px] text-primary">
+              BINANCE_TESTNET_API_KEY=...<br />
+              BINANCE_TESTNET_API_SECRET=...
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MultiAssetSection() {
+  const [assetClasses, setAssetClasses] = useState<any>(null);
+  const [commodities, setCommodities] = useState<any[]>([]);
+  const [forex, setForex] = useState<any>(null);
+
+  useEffect(() => {
+    void getAssetClasses().then(setAssetClasses).catch(() => {});
+    void getCommodityPrices().then(setCommodities).catch(() => {});
+    void getForexRates().then(setForex).catch(() => {});
+  }, []);
+
+  return (
+    <section className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="mb-10">
+          <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">12 — MULTI-ACTIFS</div>
+          <h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">Forex, Commodities & <span className="text-primary">Stocks</span></h2>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-4">
+          {/* Asset Classes */}
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">CLASSES D'ACTIFS</div>
+            {assetClasses ? (
+              <div className="space-y-3">
+                {Object.entries(assetClasses).map(([key, cls]: [string, any]) => (
+                  <div key={key}>
+                    <div className="font-['Inter'] text-sm text-foreground mb-1">{cls.name}</div>
+                    <div className="flex flex-wrap gap-1">
+                      {cls.symbols.map((s: string) => (
+                        <span key={s} className="font-['JetBrains_Mono'] text-[10px] px-1.5 py-0.5" style={{ background: "rgba(0,212,255,0.06)", color: "#e8edf5", border: "1px solid rgba(0,212,255,0.12)" }}>{s}</span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="font-['Inter'] text-xs text-muted-foreground/50">Chargement…</div>
+            )}
+          </div>
+
+          {/* Commodities */}
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">COMMODITIES</div>
+            {commodities.length > 0 ? (
+              <div className="space-y-2">
+                {commodities.map((c) => (
+                  <div key={c.symbol} className="flex items-center justify-between py-1.5 border-b border-border/30">
+                    <span className="font-['Inter'] text-xs text-foreground">{c.symbol}</span>
+                    <span className="font-['JetBrains_Mono'] text-xs text-primary">${c.price?.toLocaleString("fr-FR") ?? "—"}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="font-['Inter'] text-xs text-muted-foreground/50">Pas de données</div>
+            )}
+          </div>
+
+          {/* Forex */}
+          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">FOREX (USD)</div>
+            {forex?.rates ? (
+              <div className="space-y-2">
+                {["EUR", "GBP", "JPY", "AUD", "CAD", "CHF"].map((code) => (
+                  <div key={code} className="flex items-center justify-between py-1.5 border-b border-border/30">
+                    <span className="font-['Inter'] text-xs text-foreground">USD/{code}</span>
+                    <span className="font-['JetBrains_Mono'] text-xs text-primary">{forex.rates[code]?.toFixed(4) ?? "—"}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="font-['Inter'] text-xs text-muted-foreground/50">Pas de données</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function OptimizerSection() {
+  const [results, setResults] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleOptimize = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/api/v1/optimizer/compare`, { method: "POST" });
+      setResults(await response.json());
+    } catch {
+      setResults(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
+          <div>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">13 — OPTIMIZER</div>
+            <h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">Grid Search <span className="text-primary">Multi-Stratégies</span></h2>
+          </div>
+          <button onClick={handleOptimize} disabled={loading} className="px-4 py-2 font-['JetBrains_Mono'] text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
+            {loading ? "OPTIMISATION…" : "OPTIMISER TOUT"}
+          </button>
+        </div>
+
+        {results?.ranking && (
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {results.ranking.map((s: any, i: number) => (
+              <div key={s.strategy} className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="font-['JetBrains_Mono'] text-xs text-primary">#{i + 1}</div>
+                  {i === 0 && <span className="font-['JetBrains_Mono'] text-[10px] px-1.5 py-0.5 bg-primary/20 text-primary">BEST</span>}
+                </div>
+                <div className="font-['Inter'] text-sm text-foreground mb-3">{s.strategy.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}</div>
+                <div className="space-y-1.5 font-['JetBrains_Mono'] text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Sharpe</span>
+                    <span style={{ color: s.sharpe > 0 ? "#22c55e" : "#ef4444" }}>{s.sharpe?.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Return</span>
+                    <span style={{ color: s.return > 0 ? "#22c55e" : "#ef4444" }}>{((s.return ?? 0) * 100).toFixed(2)}%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Drawdown</span>
+                    <span className="text-red-400">{((s.drawdown ?? 0) * 100).toFixed(2)}%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Trades</span>
+                    <span className="text-foreground">{s.trades}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {results?.best_overall && (
+          <div className="mt-4 p-4 border border-primary/30 bg-primary/5 font-['JetBrains_Mono'] text-sm text-primary">
+            Meilleure stratégie: {results.best_overall.replace(/_/g, " ").toUpperCase()}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Footer() {
   return (
     <footer className="relative border-t border-border py-12">
@@ -1370,6 +1968,12 @@ export default function App() {
       <RoadmapSection />
       <WhyDifferentSection />
       <OperationsSection />
+      <MLRegimeSection />
+      <AlertsSection />
+      <AdvancedBacktestSection />
+      <BinanceTestnetSection />
+      <MultiAssetSection />
+      <OptimizerSection />
       <Footer />
     </div>
   );
