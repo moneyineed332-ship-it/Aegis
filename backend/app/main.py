@@ -7,7 +7,7 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import advisor, backtesting, coach, data_quality, deployment, execution, features, grid, journal, lab, market_data, mean_reversion, memory, optimizer, regime, risk, settings, storage, strategy_registry, supervisor
+from . import advisor, backtesting, backtesting_advanced, binance_testnet, coach, data_quality, deployment, execution, features, grid, journal, lab, market_data, mean_reversion, memory, ml_regime, multi_asset, optimizer, regime, risk, settings, storage, strategy_registry, supervisor
 
 app = FastAPI(title="AEGIS AI Quant MVP", version="0.1.0")
 app.add_middleware(
@@ -781,3 +781,299 @@ def compare_all_strategies(symbol: str = "BTCUSDT", interval: str = "1h") -> dic
     comparison["interval"] = interval
     comparison["details"] = results
     return comparison
+
+
+# === WebSocket Alerts ===
+
+from fastapi import WebSocket as FastAPIWebSocket
+from app.alerts import manager as alert_manager
+
+@app.websocket("/ws/alerts")
+async def websocket_alerts(websocket: FastAPIWebSocket):
+    await alert_manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        alert_manager.disconnect(websocket)
+
+
+@app.get("/api/v1/alerts/history")
+def get_alert_history(limit: int = 50) -> list[dict]:
+    return alert_manager.alert_history[-limit:]
+
+
+@app.get("/api/v1/alerts/thresholds")
+def get_alert_thresholds() -> dict:
+    return alert_manager.thresholds
+
+
+@app.post("/api/v1/alerts/thresholds")
+def update_alert_thresholds(thresholds: dict) -> dict:
+    for key, value in thresholds.items():
+        if key in alert_manager.thresholds:
+            alert_manager.thresholds[key] = value
+    return alert_manager.thresholds
+
+
+@app.post("/api/v1/alerts/check")
+def check_alerts() -> dict:
+    """Manually trigger alert checks on current data."""
+    candles = storage.list_ohlcv_candles("BTCUSDT", "1h", limit=200)
+    if len(candles) < 50:
+        return {"alerts": [], "error": "insufficient_data"}
+
+    feat = features.latest_features(candles)
+    positions = storage.list_positions()
+    equity_data = storage.compute_equity_curve(INITIAL_CAPITAL, positions, storage.list_recent_orders(100))
+
+    alerts = alert_manager.check_features(feat, positions, INITIAL_CAPITAL)
+    dd_alert = alert_manager.check_drawdown(equity_data)
+    if dd_alert:
+        alerts.append(dd_alert)
+
+    regime_result = regime.classify(feat)
+    regime_alert = alert_manager.check_regime(regime_result)
+    if regime_alert:
+        alerts.append(regime_alert)
+
+    return {"alerts": alerts, "checked_at": datetime.now(timezone.utc).isoformat()}
+
+
+# === Advanced Backtesting ===
+
+@app.post("/api/v1/backtests/advanced/walk-forward", status_code=201)
+def advanced_walk_forward(
+    symbol: str = "BTCUSDT",
+    interval: str = "1h",
+    objective: str = "sharpe_ratio",
+    n_splits: int = 3,
+) -> dict:
+    candles = storage.list_ohlcv_candles(symbol, interval, limit=3000)
+    quality = data_quality.validate_ohlcv(candles, interval)
+    if not quality["valid"]:
+        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
+
+    base_params = {
+        "initial_capital": INITIAL_CAPITAL, "allocation": 0.95,
+        "fee_bps": 10, "slippage_bps": 5, "interval": interval,
+    }
+    param_grid = {
+        "fast_period": [5, 10, 15, 20, 25],
+        "slow_period": [30, 40, 50, 60, 80],
+    }
+    result = backtesting_advanced.walk_forward_optimize(
+        candles, backtesting.run_sma_crossover, base_params, param_grid,
+        train_ratio=0.7, n_splits=n_splits, objective=objective,
+    )
+    result["symbol"] = symbol
+    result["interval"] = interval
+    return result
+
+
+@app.post("/api/v1/backtests/advanced/monte-carlo", status_code=201)
+def monte_carlo(
+    symbol: str = "BTCUSDT",
+    interval: str = "1h",
+    fast_period: int = 10,
+    slow_period: int = 30,
+    n_simulations: int = 1000,
+) -> dict:
+    candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
+    quality = data_quality.validate_ohlcv(candles, interval)
+    if not quality["valid"]:
+        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
+
+    params = {
+        "fast_period": fast_period, "slow_period": slow_period,
+        "initial_capital": INITIAL_CAPITAL, "allocation": 0.95,
+        "fee_bps": 10, "slippage_bps": 5, "interval": interval,
+    }
+    result = backtesting_advanced.monte_carlo_simulation(
+        candles, backtesting.run_sma_crossover, params, n_simulations,
+    )
+    result["symbol"] = symbol
+    result["interval"] = interval
+    return result
+
+
+@app.post("/api/v1/backtests/advanced/sensitivity", status_code=201)
+def sensitivity(
+    symbol: str = "BTCUSDT",
+    interval: str = "1h",
+    param_name: str = "fast_period",
+) -> dict:
+    candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
+    quality = data_quality.validate_ohlcv(candles, interval)
+    if not quality["valid"]:
+        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
+
+    base_params = {
+        "fast_period": 10, "slow_period": 30,
+        "initial_capital": INITIAL_CAPITAL, "allocation": 0.95,
+        "fee_bps": 10, "slippage_bps": 5, "interval": interval,
+    }
+    param_ranges = {
+        "fast_period": [5, 8, 10, 12, 15, 20, 25, 30],
+        "slow_period": [20, 30, 40, 50, 60, 80, 100],
+        "allocation": [0.5, 0.7, 0.8, 0.9, 0.95],
+        "fee_bps": [0, 5, 10, 15, 20],
+    }
+    param_range = param_ranges.get(param_name, [1, 2, 3, 4, 5])
+
+    result = backtesting_advanced.sensitivity_analysis(
+        candles, backtesting.run_sma_crossover, base_params, param_name, param_range,
+    )
+    result["symbol"] = symbol
+    result["interval"] = interval
+    return result
+
+
+# === ML Regime Prediction ===
+
+@app.post("/api/v1/ml/regime/train", status_code=201)
+def train_ml_regime(symbol: str = "BTCUSDT", interval: str = "1h", epochs: int = 200) -> dict:
+    """Train ML regime predictor from historical features."""
+    candles = storage.list_ohlcv_candles(symbol, interval, limit=5000)
+    if len(candles) < 200:
+        raise HTTPException(422, "Need at least 200 candles for ML training")
+
+    feature_sets = []
+    regime_labels = []
+    window = 50
+
+    for i in range(window, len(candles)):
+        window_candles = candles[i - window:i + 1]
+        try:
+            feat = features.latest_features(window_candles)
+            feature_sets.append(feat)
+            regime_result = regime.classify(feat)
+            regime_labels.append(regime_result["regime"])
+        except ValueError:
+            continue
+
+    result = ml_regime.predictor.train(feature_sets, regime_labels, epochs=epochs)
+    result["symbol"] = symbol
+    result["candles_used"] = len(candles)
+    result["samples_generated"] = len(feature_sets)
+    return result
+
+
+@app.get("/api/v1/ml/regime/predict")
+def predict_regime(symbol: str = "BTCUSDT", interval: str = "1h") -> dict:
+    """Predict current regime using trained ML model."""
+    candles = storage.list_ohlcv_candles(symbol, interval, limit=200)
+    if len(candles) < 50:
+        raise HTTPException(422, "Need at least 50 candles")
+
+    feat = features.latest_features(candles)
+    prediction = ml_regime.predictor.predict(feat)
+    rule_based = regime.classify(feat)
+
+    return {
+        "symbol": symbol,
+        "ml_prediction": prediction,
+        "rule_based": rule_based,
+        "agreement": prediction["regime"] == rule_based["regime"],
+    }
+
+
+@app.get("/api/v1/ml/regime/summary")
+def ml_regime_summary() -> dict:
+    """Get ML model summary and feature importance."""
+    return ml_regime.predictor.summary()
+
+
+# === Binance Testnet ===
+
+@app.get("/api/v1/binance/testnet/status")
+def binance_testnet_status() -> dict:
+    client = binance_testnet.BinanceTestnet()
+    return client.test_connection()
+
+
+@app.get("/api/v1/binance/testnet/price")
+def binance_testnet_price(symbol: str = "BTCUSDT") -> dict:
+    client = binance_testnet.BinanceTestnet()
+    return client.get_price(symbol)
+
+
+@app.get("/api/v1/binance/testnet/account")
+def binance_testnet_account() -> dict:
+    client = binance_testnet.BinanceTestnet()
+    return client.get_account()
+
+
+@app.post("/api/v1/binance/testnet/order/market", status_code=201)
+def binance_testnet_market_order(symbol: str, side: str, quantity: float) -> dict:
+    client = binance_testnet.BinanceTestnet()
+    return client.place_market_order(symbol, side, quantity)
+
+
+@app.post("/api/v1/binance/testnet/order/limit", status_code=201)
+def binance_testnet_limit_order(symbol: str, side: str, quantity: float, price: float) -> dict:
+    client = binance_testnet.BinanceTestnet()
+    return client.place_limit_order(symbol, side, quantity, price)
+
+
+@app.delete("/api/v1/binance/testnet/order")
+def binance_testnet_cancel_order(symbol: str, order_id: int) -> dict:
+    client = binance_testnet.BinanceTestnet()
+    return client.cancel_order(symbol, order_id)
+
+
+@app.get("/api/v1/binance/testnet/orders")
+def binance_testnet_orders(symbol: str | None = None) -> list[dict]:
+    client = binance_testnet.BinanceTestnet()
+    return client.get_open_orders(symbol)
+
+
+@app.get("/api/v1/binance/testnet/klines")
+def binance_testnet_klines(symbol: str = "BTCUSDT", interval: str = "1h", limit: int = 500) -> list[dict]:
+    client = binance_testnet.BinanceTestnet()
+    return client.get_klines(symbol, interval, limit)
+
+
+@app.get("/api/v1/binance/testnet/health")
+def binance_testnet_health() -> dict:
+    client = binance_testnet.BinanceTestnet()
+    return client.health_check()
+
+
+# === Multi-Asset ===
+
+@app.get("/api/v1/assets/classes")
+def get_asset_classes() -> dict:
+    return multi_asset.get_asset_classes()
+
+
+@app.get("/api/v1/assets/symbols")
+def get_supported_symbols() -> list[str]:
+    return multi_asset.get_supported_symbols()
+
+
+@app.get("/api/v1/assets/price")
+def get_asset_price(symbol: str, asset_class: str | None = None) -> dict:
+    return multi_asset.fetch_asset_price(symbol, asset_class)
+
+
+@app.get("/api/v1/assets/ohlcv")
+def get_asset_ohlcv(symbol: str, interval: str = "1h", limit: int = 200, asset_class: str | None = None) -> list[dict]:
+    return multi_asset.fetch_asset_ohlcv(symbol, interval, limit, asset_class)
+
+
+@app.get("/api/v1/assets/forex")
+def get_forex_rates(base: str = "USD") -> dict:
+    return multi_asset.fetch_forex_rates(base)
+
+
+@app.get("/api/v1/assets/commodities")
+def get_commodity_prices() -> list[dict]:
+    return multi_asset.fetch_commodity_prices()
+
+
+@app.get("/api/v1/assets/stock/{symbol}")
+def get_stock_price(symbol: str) -> dict:
+    return multi_asset.fetch_stock_price(symbol)

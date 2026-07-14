@@ -386,6 +386,100 @@ def test_compare_strategies():
     assert r.status_code in (200, 422)
 
 
+# === Phase 4: WebSocket Alerts ===
+
+def test_alert_history():
+    r = client.get("/api/v1/alerts/history")
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+
+
+def test_alert_thresholds():
+    r = client.get("/api/v1/alerts/thresholds")
+    assert r.status_code == 200
+    data = r.json()
+    assert "max_drawdown_pct" in data
+
+
+def test_check_alerts():
+    r = client.post("/api/v1/alerts/check")
+    assert r.status_code == 200
+
+
+# === Phase 4: Advanced Backtesting ===
+
+def test_advanced_walk_forward():
+    r = client.post("/api/v1/backtests/advanced/walk-forward")
+    assert r.status_code in (200, 201, 422)
+
+
+def test_monte_carlo():
+    r = client.post("/api/v1/backtests/advanced/monte-carlo")
+    assert r.status_code in (200, 201, 422)
+
+
+def test_sensitivity():
+    r = client.post("/api/v1/backtests/advanced/sensitivity")
+    assert r.status_code in (200, 201, 422)
+
+
+# === Phase 4: ML Regime ===
+
+def test_ml_regime_summary():
+    r = client.get("/api/v1/ml/regime/summary")
+    assert r.status_code == 200
+    data = r.json()
+    assert "trained" in data
+
+
+def test_ml_regime_predict():
+    r = client.get("/api/v1/ml/regime/predict")
+    assert r.status_code in (200, 422)
+
+
+# === Phase 4: Binance Testnet ===
+
+def test_binance_testnet_health():
+    r = client.get("/api/v1/binance/testnet/health")
+    assert r.status_code == 200
+
+
+def test_binance_testnet_status():
+    r = client.get("/api/v1/binance/testnet/status")
+    assert r.status_code == 200
+
+
+def test_binance_testnet_price():
+    r = client.get("/api/v1/binance/testnet/price?symbol=BTCUSDT")
+    assert r.status_code == 200
+
+
+# === Phase 4: Multi-Asset ===
+
+def test_asset_classes():
+    r = client.get("/api/v1/assets/classes")
+    assert r.status_code == 200
+    data = r.json()
+    assert "crypto" in data
+
+
+def test_supported_symbols():
+    r = client.get("/api/v1/assets/symbols")
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+
+
+def test_forex_rates():
+    r = client.get("/api/v1/assets/forex")
+    assert r.status_code in (200, 422)
+
+
+def test_commodity_prices():
+    r = client.get("/api/v1/assets/commodities")
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+
+
 # === Deployment ===
 
 def test_create_pipeline():
@@ -433,6 +527,11 @@ if __name__ == "__main__":
         test_grid_backtest, test_grid_walk_forward,
         test_market_order, test_limit_order, test_fractioned_order, test_estimate_slippage,
         test_optimize_sma, test_optimize_donchian, test_optimize_mean_reversion, test_optimize_grid, test_compare_strategies,
+        test_alert_history, test_alert_thresholds, test_check_alerts,
+        test_advanced_walk_forward, test_monte_carlo, test_sensitivity,
+        test_ml_regime_summary, test_ml_regime_predict,
+        test_binance_testnet_health, test_binance_testnet_status, test_binance_testnet_price,
+        test_asset_classes, test_supported_symbols, test_forex_rates, test_commodity_prices,
         test_create_pipeline, test_validate_backtest,
     ]
     passed = 0

@@ -87,3 +87,78 @@ export const runGridWalkForward = () => postApi("/api/v1/backtests/grid/walk-for
 export const refreshFearGreed = () => postApi("/api/v1/fear-greed/refresh");
 export const refreshFundingRates = (symbol: string = "BTCUSDT") => postApi(`/api/v1/funding-rates/refresh?symbol=${symbol}`);
 export const refreshOpenInterest = (symbol: string = "BTCUSDT") => postApi(`/api/v1/open-interest/refresh?symbol=${symbol}`);
+
+// Phase 4: Alerts
+export interface Alert {
+  type: string;
+  severity: string;
+  message: string;
+  value?: number;
+  threshold?: number;
+  timestamp: string;
+}
+export const getAlertHistory = async (limit: number = 50): Promise<Alert[]> => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/alerts/history?limit=${limit}`);
+  return response.json() as Promise<Alert[]>;
+};
+export const getAlertThresholds = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/alerts/thresholds`);
+  return response.json();
+};
+export const checkAlerts = () => postApi<{ alerts: Alert[] }>("/api/v1/alerts/check");
+
+// Phase 4: Advanced Backtesting
+export const runAdvancedWalkForward = (symbol: string = "BTCUSDT", nSplits: number = 3) =>
+  postApi(`/api/v1/backtests/advanced/walk-forward?symbol=${symbol}&n_splits=${nSplits}`);
+export const runMonteCarlo = (symbol: string = "BTCUSDT", nSimulations: number = 1000) =>
+  postApi(`/api/v1/backtests/advanced/monte-carlo?symbol=${symbol}&n_simulations=${nSimulations}`);
+export const runSensitivity = (symbol: string = "BTCUSDT", paramName: string = "fast_period") =>
+  postApi(`/api/v1/backtests/advanced/sensitivity?symbol=${symbol}&param_name=${paramName}`);
+
+// Phase 4: ML Regime
+export interface MLRegimeSummary {
+  trained: boolean;
+  n_features: number;
+  feature_names: string[];
+  feature_importance: Record<string, number>;
+  n_classes: number;
+  classes: string[];
+}
+export const trainMLRegime = (symbol: string = "BTCUSDT", epochs: number = 200) =>
+  postApi(`/api/v1/ml/regime/train?symbol=${symbol}&epochs=${epochs}`);
+export const predictRegime = async (symbol: string = "BTCUSDT") => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/ml/regime/predict?symbol=${symbol}`);
+  return response.json();
+};
+export const getMLRegimeSummary = async (): Promise<MLRegimeSummary> => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/ml/regime/summary`);
+  return response.json() as Promise<MLRegimeSummary>;
+};
+
+// Phase 4: Binance Testnet
+export const getBinanceTestnetStatus = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/binance/testnet/status`);
+  return response.json();
+};
+export const getBinanceTestnetPrice = async (symbol: string = "BTCUSDT") => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/binance/testnet/price?symbol=${symbol}`);
+  return response.json();
+};
+
+// Phase 4: Multi-Asset
+export const getAssetClasses = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/assets/classes`);
+  return response.json();
+};
+export const getSupportedSymbols = async (): Promise<string[]> => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/assets/symbols`);
+  return response.json() as Promise<string[]>;
+};
+export const getForexRates = async (base: string = "USD") => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/assets/forex?base=${base}`);
+  return response.json();
+};
+export const getCommodityPrices = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/assets/commodities`);
+  return response.json();
+};
