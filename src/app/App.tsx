@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { activateEmergencyStop, getDashboard, getSupervisor, postApi, refreshFearGreed, refreshFundingRates, refreshHistory, refreshMarketData, refreshOpenInterest, resumeSupervisor, runDonchianWalkForward, runGridWalkForward, runMeanReversionWalkForward, runSmaWalkForward, trainMLRegime, predictRegime, getMLRegimeSummary, checkAlerts, getAlertHistory, runAdvancedWalkForward, runMonteCarlo, runSensitivity, getBinanceTestnetStatus, getBinanceTestnetPrice, getAssetClasses, getCommodityPrices, getForexRates, type DashboardSnapshot, type SupervisorStatus, type Alert, type MLRegimeSummary } from "../lib/api";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
+import { activateEmergencyStop, getDashboard, getSupervisor, postApi, refreshFearGreed, refreshFundingRates, refreshHistory, refreshMarketData, refreshOpenInterest, resumeSupervisor, runDonchianWalkForward, runGridWalkForward, runMeanReversionWalkForward, runSmaWalkForward, trainMLRegime, predictRegime, getMLRegimeSummary, checkAlerts, getAlertHistory, getAlertThresholds, runAdvancedWalkForward, runMonteCarlo, runSensitivity, getBinanceTestnetStatus, getBinanceTestnetPrice, getAssetClasses, getCommodityPrices, getForexRates, getAIStatus, aiAnalyzeMarket, aiAssessRisk, aiReviewStrategies, aiAnalyzeSentiment, getCoingeckoGlobal, getCoingeckoTrending, getCoingeckoGainers, getCoingeckoLosers, getDefillamaTVL, getDefillamaProtocols, getDefillamaYields, getPerpFinderFunding, getPerpFinderOI, getPerpFinderLiquidations, getMempoolFees, getDexScreenerTrending, getPolymarketCrypto, getFearGreedHistorical, type DashboardSnapshot, type SupervisorStatus, type Alert, type MLRegimeSummary } from "../lib/api";
 import {
   Activity,
   AlertTriangle,
@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Cpu,
   Database,
+  Diamond,
   Eye,
   FlaskConical,
   GitBranch,
@@ -24,11 +25,39 @@ import {
   Target,
   Terminal,
   TrendingUp,
+  Wallet,
   Wifi,
   X,
   Zap,
 } from "lucide-react";
-import { LineChart as ReLineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+
+const LazyEquityChart = lazy(() =>
+  import("recharts").then((m) => ({
+    default: function EquityChartInner({ data }: { data: Array<{ t: string; v: number }> }) {
+      return (
+        <m.ResponsiveContainer width="100%" height="100%">
+          <m.LineChart data={data}>
+            <defs>
+              <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="#0057ff" />
+                <stop offset="100%" stopColor="#00d4ff" />
+              </linearGradient>
+            </defs>
+            <m.XAxis dataKey="t" tick={{ fill: "#6b7fa3", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
+            <m.YAxis hide />
+            <m.Tooltip
+              contentStyle={{ background: "#0b1220", border: "1px solid rgba(0,212,255,0.2)", borderRadius: 4 }}
+              labelStyle={{ color: "#6b7fa3", fontFamily: "JetBrains Mono", fontSize: 10 }}
+              itemStyle={{ color: "#00d4ff", fontFamily: "JetBrains Mono" }}
+              formatter={(v: number) => [`$${v.toLocaleString()}`, "Equity"]}
+            />
+            <m.Line type="monotone" dataKey="v" stroke="url(#lineGrad)" strokeWidth={2} dot={false} />
+          </m.LineChart>
+        </m.ResponsiveContainer>
+      );
+    },
+  }))
+);
 
 // --- Types ---
 interface Module {
@@ -416,33 +445,33 @@ function HeroSection() {
         }}
       />
 
-      <div className="relative z-10 max-w-7xl mx-auto px-6 py-24 grid lg:grid-cols-2 gap-16 items-center">
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-24 grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
         {/* Left */}
         <div>
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 mb-8 border border-primary/30 rounded-sm">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 mb-6 sm:mb-8 border border-primary/30 rounded-sm">
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-            <span className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest">VERSION 1.0 — CONFIDENTIEL</span>
+            <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary tracking-widest">VERSION 1.0 — CONFIDENTIEL</span>
           </div>
 
-          <h1 className="font-['Rajdhani'] font-700 text-5xl sm:text-6xl lg:text-7xl leading-none tracking-tight mb-6">
+          <h1 className="font-['Rajdhani'] font-700 text-4xl sm:text-6xl lg:text-7xl leading-none tracking-tight mb-4 sm:mb-6">
             <span className="text-foreground">AEGIS</span>
             <br />
             <span style={{ color: "#00d4ff" }}>AI QUANT</span>
             <br />
-            <span className="text-foreground text-4xl sm:text-5xl lg:text-6xl">V1</span>
+            <span className="text-foreground text-3xl sm:text-5xl lg:text-6xl">V1</span>
           </h1>
 
-          <p className="font-['Inter'] text-base text-muted-foreground leading-relaxed mb-4 max-w-md">
+          <p className="font-['Inter'] text-sm sm:text-base text-muted-foreground leading-relaxed mb-3 sm:mb-4 max-w-md">
             Système autonome de trading crypto — Observer, comprendre, décider, exécuter et évoluer sans intervention permanente.
           </p>
 
-          <p className="font-['Inter'] text-sm text-muted-foreground/70 italic mb-10 max-w-sm">
+          <p className="font-['Inter'] text-xs sm:text-sm text-muted-foreground/70 italic mb-6 sm:mb-10 max-w-sm">
             "Robustesse avant tout."
           </p>
 
-          <div className="flex flex-wrap gap-4 mb-12">
+          <div className="flex flex-wrap gap-3 sm:gap-4 mb-8 sm:mb-12">
             <button
-              className="flex items-center gap-2 px-6 py-3 font-['Rajdhani'] font-600 tracking-wider text-sm transition-all duration-200 hover:scale-105"
+              className="flex items-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 font-['Rajdhani'] font-600 tracking-wider text-xs sm:text-sm transition-all duration-200 hover:scale-105"
               style={{
                 background: "linear-gradient(135deg, #00d4ff, #0057ff)",
                 color: "#04080f",
@@ -453,7 +482,7 @@ function HeroSection() {
               <ChevronRight className="w-4 h-4" />
             </button>
             <button
-              className="flex items-center gap-2 px-6 py-3 font-['Rajdhani'] font-600 tracking-wider text-sm border border-primary/40 text-primary hover:border-primary hover:bg-primary/5 transition-all duration-200"
+              className="flex items-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 font-['Rajdhani'] font-600 tracking-wider text-xs sm:text-sm border border-primary/40 text-primary hover:border-primary hover:bg-primary/5 transition-all duration-200"
               style={{ clipPath: "polygon(10px 0%, 100% 0%, calc(100% - 10px) 100%, 0% 100%)" }}
             >
               VOIR L'ARCHITECTURE
@@ -461,15 +490,15 @@ function HeroSection() {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-3 gap-6">
+          <div className="grid grid-cols-3 gap-3 sm:gap-6">
             {[
               { value: "15", label: "Modules", unit: "" },
               { value: "24/7", label: "Surveillance", unit: "" },
               { value: `${count}%`, label: "Win rate cible", unit: "" },
             ].map((s) => (
-              <div key={s.label} className="border-l-2 border-primary/40 pl-4">
-                <div className="font-['Rajdhani'] font-700 text-2xl text-primary">{s.value}</div>
-                <div className="font-['Inter'] text-xs text-muted-foreground tracking-wider">{s.label}</div>
+              <div key={s.label} className="border-l-2 border-primary/40 pl-2 sm:pl-4">
+                <div className="font-['Rajdhani'] font-700 text-lg sm:text-2xl text-primary">{s.value}</div>
+                <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground tracking-wider">{s.label}</div>
               </div>
             ))}
           </div>
@@ -478,7 +507,7 @@ function HeroSection() {
         {/* Right — live PnL card */}
         <div className="relative">
           <div
-            className="relative border border-primary/20 p-6"
+            className="relative border border-primary/20 p-4 sm:p-6"
             style={{
               background: "rgba(11,18,32,0.8)",
               backdropFilter: "blur(20px)",
@@ -486,10 +515,10 @@ function HeroSection() {
             }}
           >
             {/* Header */}
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
               <div>
-                <div className="font-['JetBrains_Mono'] text-xs text-muted-foreground tracking-widest mb-1">PERFORMANCE SIMULÉE</div>
-                <div className="font-['Rajdhani'] font-700 text-3xl text-foreground">
+                <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground tracking-widest mb-1">PERFORMANCE SIMULÉE</div>
+                <div className="font-['Rajdhani'] font-700 text-2xl sm:text-3xl text-foreground">
                   ${dashboard?.current_equity?.toLocaleString("fr-FR", { maximumFractionDigits: 0 }) ?? dashboard?.capital?.toLocaleString("fr-FR", { maximumFractionDigits: 0 }) ?? "—"}
                 </div>
                 <div className="font-['Inter'] text-sm text-primary">
@@ -528,17 +557,17 @@ function HeroSection() {
               </div>
             )}
 
-            <div className="mb-4 grid grid-cols-2 gap-2">
-              <button onClick={() => void runResearchAction("Mise à jour marché", refreshMarketData)} disabled={Boolean(operation)} className="border border-primary/30 px-3 py-2 font-['JetBrains_Mono'] text-xs text-primary disabled:opacity-50">PRIX MARCHÉ</button>
-              <button onClick={() => void runResearchAction("Historique OHLCV", refreshHistory)} disabled={Boolean(operation)} className="border border-primary/30 px-3 py-2 font-['JetBrains_Mono'] text-xs text-primary disabled:opacity-50">CHARGER OHLCV</button>
-              <button onClick={() => void runResearchAction("Walk-forward SMA", runSmaWalkForward)} disabled={Boolean(operation)} className="border border-primary/30 px-3 py-2 font-['JetBrains_Mono'] text-xs text-primary disabled:opacity-50">TESTER SMA</button>
-              <button onClick={() => void runResearchAction("Walk-forward Donchian", runDonchianWalkForward)} disabled={Boolean(operation)} className="border border-primary/30 px-3 py-2 font-['JetBrains_Mono'] text-xs text-primary disabled:opacity-50">TESTER DONCHIAN</button>
-              <button onClick={() => void runResearchAction("Walk-forward Mean Reversion", runMeanReversionWalkForward)} disabled={Boolean(operation)} className="border border-primary/30 px-3 py-2 font-['JetBrains_Mono'] text-xs text-primary disabled:opacity-50">TESTER MEAN REV</button>
-              <button onClick={() => void runResearchAction("Walk-forward Grid", runGridWalkForward)} disabled={Boolean(operation)} className="border border-primary/30 px-3 py-2 font-['JetBrains_Mono'] text-xs text-primary disabled:opacity-50">TESTER GRID</button>
-              <button onClick={() => void runResearchAction("Fear & Greed", refreshFearGreed)} disabled={Boolean(operation)} className="border border-primary/30 px-3 py-2 font-['JetBrains_Mono'] text-xs text-primary disabled:opacity-50">FEAR & GREED</button>
-              <button onClick={() => void runResearchAction("Funding Rate", () => refreshFundingRates())} disabled={Boolean(operation)} className="border border-primary/30 px-3 py-2 font-['JetBrains_Mono'] text-xs text-primary disabled:opacity-50">FUNDING RATE</button>
-              <button onClick={() => void runResearchAction("Open Interest", () => refreshOpenInterest())} disabled={Boolean(operation)} className="border border-primary/30 px-3 py-2 font-['JetBrains_Mono'] text-xs text-primary disabled:opacity-50">OPEN INTEREST</button>
-              <button onClick={() => void runResearchAction("Mémoire", () => postApi("/api/v1/memory/remember"))} disabled={Boolean(operation)} className="border border-primary/30 px-3 py-2 font-['JetBrains_Mono'] text-xs text-primary disabled:opacity-50">MÉMOIRE</button>
+            <div className="mb-3 sm:mb-4 grid grid-cols-2 gap-1.5 sm:gap-2">
+              <button onClick={() => void runResearchAction("Mise à jour marché", refreshMarketData)} disabled={Boolean(operation)} className="border border-primary/30 px-2 sm:px-3 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary disabled:opacity-50">PRIX MARCHÉ</button>
+              <button onClick={() => void runResearchAction("Historique OHLCV", refreshHistory)} disabled={Boolean(operation)} className="border border-primary/30 px-2 sm:px-3 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary disabled:opacity-50">CHARGER OHLCV</button>
+              <button onClick={() => void runResearchAction("Walk-forward SMA", runSmaWalkForward)} disabled={Boolean(operation)} className="border border-primary/30 px-2 sm:px-3 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary disabled:opacity-50">TESTER SMA</button>
+              <button onClick={() => void runResearchAction("Walk-forward Donchian", runDonchianWalkForward)} disabled={Boolean(operation)} className="border border-primary/30 px-2 sm:px-3 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary disabled:opacity-50">TESTER DONCHIAN</button>
+              <button onClick={() => void runResearchAction("Walk-forward Mean Reversion", runMeanReversionWalkForward)} disabled={Boolean(operation)} className="border border-primary/30 px-2 sm:px-3 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary disabled:opacity-50">TESTER MEAN REV</button>
+              <button onClick={() => void runResearchAction("Walk-forward Grid", runGridWalkForward)} disabled={Boolean(operation)} className="border border-primary/30 px-2 sm:px-3 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary disabled:opacity-50">TESTER GRID</button>
+              <button onClick={() => void runResearchAction("Fear & Greed", refreshFearGreed)} disabled={Boolean(operation)} className="border border-primary/30 px-2 sm:px-3 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary disabled:opacity-50">FEAR & GREED</button>
+              <button onClick={() => void runResearchAction("Funding Rate", () => refreshFundingRates())} disabled={Boolean(operation)} className="border border-primary/30 px-2 sm:px-3 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary disabled:opacity-50">FUNDING RATE</button>
+              <button onClick={() => void runResearchAction("Open Interest", () => refreshOpenInterest())} disabled={Boolean(operation)} className="border border-primary/30 px-2 sm:px-3 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary disabled:opacity-50">OPEN INTEREST</button>
+              <button onClick={() => void runResearchAction("Mémoire", () => postApi("/api/v1/memory/remember"))} disabled={Boolean(operation)} className="border border-primary/30 px-2 sm:px-3 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary disabled:opacity-50">MÉMOIRE</button>
             </div>
             {(operation || operationError) && <div className={`mb-4 font-['JetBrains_Mono'] text-xs ${operationError ? "text-red-400" : "text-primary"}`}>{operationError ?? `${operation}…`}</div>}
 
@@ -553,25 +582,9 @@ function HeroSection() {
 
             {/* Chart */}
             <div className="h-40 mb-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <ReLineChart data={(dashboard?.equity_curve ?? []).map((p, i) => ({ t: `#${i}`, v: p.equity }))}>
-                  <defs>
-                    <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor="#0057ff" />
-                      <stop offset="100%" stopColor="#00d4ff" />
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="t" tick={{ fill: "#6b7fa3", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
-                  <YAxis hide />
-                  <Tooltip
-                    contentStyle={{ background: "#0b1220", border: "1px solid rgba(0,212,255,0.2)", borderRadius: 4 }}
-                    labelStyle={{ color: "#6b7fa3", fontFamily: "JetBrains Mono", fontSize: 10 }}
-                    itemStyle={{ color: "#00d4ff", fontFamily: "JetBrains Mono" }}
-                    formatter={(v: number) => [`$${v.toLocaleString()}`, "Equity"]}
-                  />
-                  <Line type="monotone" dataKey="v" stroke="url(#lineGrad)" strokeWidth={2} dot={false} />
-                </ReLineChart>
-              </ResponsiveContainer>
+              <Suspense fallback={<div className="w-full h-full flex items-center justify-center font-['JetBrains_Mono'] text-xs text-muted-foreground/50">Chargement graphique…</div>}>
+                <LazyEquityChart data={(dashboard?.equity_curve ?? []).map((p, i) => ({ t: `#${i}`, v: p.equity }))} />
+              </Suspense>
             </div>
 
             {/* Live position rows */}
@@ -613,34 +626,34 @@ function HeroSection() {
 
 function ArchitectureSection() {
   return (
-    <section id="architecture" className="relative py-32 overflow-hidden">
+    <section id="architecture" className="relative py-16 sm:py-32 overflow-hidden">
       <GridLines />
       <GlowOrb x="90%" y="50%" size="500px" color="#0057ff" opacity={0.08} />
 
-      <div className="relative z-10 max-w-7xl mx-auto px-6">
-        <div className="grid lg:grid-cols-2 gap-16 items-start">
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="grid lg:grid-cols-2 gap-10 sm:gap-16 items-start">
           {/* Left — text */}
           <div>
             <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-4">02 — ARCHITECTURE</div>
-            <h2 className="font-['Rajdhani'] font-700 text-4xl sm:text-5xl text-foreground mb-6 leading-tight">
+            <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-5xl text-foreground mb-4 sm:mb-6 leading-tight">
               Pipeline<br />
               <span style={{ color: "#00d4ff" }}>linéaire</span><br />
               et déterministe
             </h2>
-            <p className="font-['Inter'] text-sm text-muted-foreground leading-relaxed max-w-md mb-8">
+            <p className="font-['Inter'] text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-md mb-6 sm:mb-8">
               Le système suit un pipeline strict, de la collecte des données brutes jusqu'au déploiement sécurisé,
               en passant par l'analyse, la décision et l'exécution. Chaque étape valide l'étape précédente.
             </p>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
               {[
                 { label: "Latence totale", value: "<50ms" },
                 { label: "Uptime cible", value: "99.9%" },
                 { label: "Agents IA", value: "5 votes" },
                 { label: "Rollback", value: "Instantané" },
               ].map((m) => (
-                <div key={m.label} className="p-4 border border-border" style={{ background: "rgba(11,18,32,0.6)" }}>
-                  <div className="font-['Rajdhani'] font-700 text-xl text-primary">{m.value}</div>
-                  <div className="font-['Inter'] text-xs text-muted-foreground mt-1">{m.label}</div>
+                <div key={m.label} className="p-3 sm:p-4 border border-border" style={{ background: "rgba(11,18,32,0.6)" }}>
+                  <div className="font-['Rajdhani'] font-700 text-lg sm:text-xl text-primary">{m.value}</div>
+                  <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground mt-1">{m.label}</div>
                 </div>
               ))}
             </div>
@@ -700,25 +713,25 @@ function ModulesSection() {
   const [active, setActive] = useState<number | null>(null);
 
   return (
-    <section id="modules" className="relative py-32 overflow-hidden">
+    <section id="modules" className="relative py-16 sm:py-32 overflow-hidden">
       <GlowOrb x="50%" y="50%" size="800px" color="#0057ff" opacity={0.05} />
 
-      <div className="relative z-10 max-w-7xl mx-auto px-6">
-        <div className="text-center mb-16">
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="text-center mb-10 sm:mb-16">
           <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-4">03 — MODULES</div>
-          <h2 className="font-['Rajdhani'] font-700 text-4xl sm:text-5xl text-foreground mb-4">
+          <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-5xl text-foreground mb-3 sm:mb-4">
             Les <span style={{ color: "#00d4ff" }}>15 modules</span>
           </h2>
-          <p className="font-['Inter'] text-sm text-muted-foreground max-w-lg mx-auto">
+          <p className="font-['Inter'] text-xs sm:text-sm text-muted-foreground max-w-lg mx-auto">
             Chaque module est indépendant, spécialisé et traçable. Ensemble ils forment un système autonome complet.
           </p>
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {modules.map((mod) => (
             <div
               key={mod.id}
-              className="relative p-5 border cursor-pointer transition-all duration-300 group"
+              className="relative p-4 sm:p-5 border cursor-pointer transition-all duration-300 group"
               style={{
                 background: active === mod.id ? `${mod.color}08` : "rgba(11,18,32,0.7)",
                 borderColor: active === mod.id ? `${mod.color}40` : "rgba(0,212,255,0.08)",
@@ -727,29 +740,29 @@ function ModulesSection() {
             >
               {/* Module number */}
               <div
-                className="absolute top-3 right-4 font-['JetBrains_Mono'] text-xs"
+                className="absolute top-2 sm:top-3 right-3 sm:right-4 font-['JetBrains_Mono'] text-[10px] sm:text-xs"
                 style={{ color: `${mod.color}40` }}
               >
                 {String(mod.id).padStart(2, "0")}
               </div>
 
               {/* Icon + title */}
-              <div className="flex items-start gap-3 mb-3">
+              <div className="flex items-start gap-2 sm:gap-3 mb-2 sm:mb-3">
                 <div
-                  className="w-9 h-9 flex items-center justify-center shrink-0"
+                  className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center shrink-0"
                   style={{ background: `${mod.color}15`, color: mod.color, border: `1px solid ${mod.color}25` }}
                 >
                   {mod.icon}
                 </div>
                 <div>
-                  <div className="font-['Rajdhani'] font-700 text-sm text-foreground leading-tight">{mod.title}</div>
-                  <div className="font-['JetBrains_Mono'] text-xs mt-0.5" style={{ color: mod.color }}>
+                  <div className="font-['Rajdhani'] font-700 text-xs sm:text-sm text-foreground leading-tight">{mod.title}</div>
+                  <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs mt-0.5" style={{ color: mod.color }}>
                     {mod.subtitle}
                   </div>
                 </div>
               </div>
 
-              <p className="font-['Inter'] text-xs text-muted-foreground leading-relaxed mb-3">{mod.description}</p>
+              <p className="font-['Inter'] text-[11px] sm:text-xs text-muted-foreground leading-relaxed mb-2 sm:mb-3">{mod.description}</p>
 
               {/* Expandable bullets */}
               {active === mod.id && (
@@ -790,40 +803,40 @@ function ModulesSection() {
 
 function TechSection() {
   return (
-    <section id="technologies" className="relative py-32 overflow-hidden">
+    <section id="technologies" className="relative py-16 sm:py-32 overflow-hidden">
       <GridLines />
       <GlowOrb x="0%" y="70%" size="500px" color="#8b5cf6" opacity={0.08} />
 
-      <div className="relative z-10 max-w-7xl mx-auto px-6">
-        <div className="grid lg:grid-cols-2 gap-16 items-center">
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="grid lg:grid-cols-2 gap-10 sm:gap-16 items-center">
           <div>
             <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-4">04 — TECHNOLOGIES</div>
-            <h2 className="font-['Rajdhani'] font-700 text-4xl sm:text-5xl text-foreground mb-6 leading-tight">
+            <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-5xl text-foreground mb-4 sm:mb-6 leading-tight">
               Stack<br />
               <span style={{ color: "#00d4ff" }}>production-grade</span>
             </h2>
-            <p className="font-['Inter'] text-sm text-muted-foreground leading-relaxed max-w-md">
+            <p className="font-['Inter'] text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-md">
               Chaque choix technologique est justifié par des exigences de performance, de fiabilité et de scalabilité.
               Rien de superflu.
             </p>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {techStack.map((cat) => (
               <div
                 key={cat.category}
-                className="p-5 border border-border transition-all duration-200 hover:border-primary/25"
+                className="p-4 sm:p-5 border border-border transition-all duration-200 hover:border-primary/25"
                 style={{ background: "rgba(11,18,32,0.7)" }}
               >
-                <div className="flex items-center gap-2 mb-3">
+                <div className="flex items-center gap-2 mb-2 sm:mb-3">
                   <span className="text-primary">{cat.icon}</span>
-                  <span className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest">{cat.category}</span>
+                  <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary tracking-widest">{cat.category}</span>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1.5 sm:gap-2">
                   {cat.items.map((item) => (
                     <span
                       key={item}
-                      className="font-['JetBrains_Mono'] text-xs px-2.5 py-1"
+                      className="font-['JetBrains_Mono'] text-[10px] sm:text-xs px-2 py-0.5 sm:py-1"
                       style={{
                         background: "rgba(0,212,255,0.06)",
                         color: "#e8edf5",
@@ -847,24 +860,24 @@ function RoadmapSection() {
   const [activePhase, setActivePhase] = useState(1);
 
   return (
-    <section id="roadmap" className="relative py-32 overflow-hidden">
+    <section id="roadmap" className="relative py-16 sm:py-32 overflow-hidden">
       <GlowOrb x="50%" y="50%" size="600px" color="#00d4ff" opacity={0.05} />
 
-      <div className="relative z-10 max-w-7xl mx-auto px-6">
-        <div className="text-center mb-16">
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="text-center mb-10 sm:mb-16">
           <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-4">05 — FEUILLE DE ROUTE</div>
-          <h2 className="font-['Rajdhani'] font-700 text-4xl sm:text-5xl text-foreground mb-4">
+          <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-5xl text-foreground mb-3 sm:mb-4">
             5 phases vers <span style={{ color: "#00d4ff" }}>l'autonomie</span>
           </h2>
         </div>
 
         {/* Phase tabs */}
-        <div className="flex flex-wrap justify-center gap-2 mb-12">
+        <div className="flex flex-wrap justify-center gap-1.5 sm:gap-2 mb-8 sm:mb-12">
           {phases.map((p) => (
             <button
               key={p.id}
               onClick={() => setActivePhase(p.id)}
-              className="flex items-center gap-2 px-4 py-2.5 font-['Rajdhani'] font-600 text-sm tracking-wider transition-all duration-200"
+              className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 font-['Rajdhani'] font-600 text-xs sm:text-sm tracking-wider transition-all duration-200"
               style={{
                 background: activePhase === p.id ? `${p.color}15` : "rgba(11,18,32,0.6)",
                 color: activePhase === p.id ? p.color : "#6b7fa3",
@@ -872,7 +885,7 @@ function RoadmapSection() {
               }}
             >
               <span
-                className="w-2 h-2 rounded-full"
+                className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full"
                 style={{ background: activePhase === p.id ? p.color : "#6b7fa3" }}
               />
               {p.label}
@@ -885,7 +898,7 @@ function RoadmapSection() {
           p.id === activePhase ? (
             <div key={p.id} className="max-w-2xl mx-auto">
               <div
-                className="p-8 border text-center"
+                className="p-6 sm:p-8 border text-center"
                 style={{
                   background: `${p.color}06`,
                   borderColor: `${p.color}30`,
@@ -895,19 +908,19 @@ function RoadmapSection() {
                 <div className="font-['JetBrains_Mono'] text-xs mb-2" style={{ color: p.color }}>
                   {p.label}
                 </div>
-                <h3 className="font-['Rajdhani'] font-700 text-3xl text-foreground mb-6">{p.name}</h3>
-                <div className="flex flex-wrap justify-center gap-3">
+                <h3 className="font-['Rajdhani'] font-700 text-2xl sm:text-3xl text-foreground mb-4 sm:mb-6">{p.name}</h3>
+                <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
                   {p.items.map((item) => (
                     <div
                       key={item}
-                      className="flex items-center gap-2 px-4 py-2 font-['Inter'] text-sm"
+                      className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 font-['Inter'] text-xs sm:text-sm"
                       style={{
                         background: `${p.color}10`,
                         border: `1px solid ${p.color}25`,
                         color: "#e8edf5",
                       }}
                     >
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: p.color }} />
+                      <span className="w-1 sm:w-1.5 h-1 sm:h-1.5 rounded-full" style={{ background: p.color }} />
                       {item}
                     </div>
                   ))}
@@ -965,37 +978,37 @@ function WhyDifferentSection() {
   ];
 
   return (
-    <section className="relative py-32 overflow-hidden">
+    <section className="relative py-16 sm:py-32 overflow-hidden">
       <GridLines />
       <GlowOrb x="50%" y="50%" size="700px" color="#00d4ff" opacity={0.06} />
 
-      <div className="relative z-10 max-w-7xl mx-auto px-6">
-        <div className="text-center mb-16">
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="text-center mb-10 sm:mb-16">
           <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-4">06 — DIFFÉRENCIATION</div>
-          <h2 className="font-['Rajdhani'] font-700 text-4xl sm:text-5xl text-foreground mb-6 leading-tight">
+          <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-5xl text-foreground mb-4 sm:mb-6 leading-tight">
             Ce qui rend<br />
             <span style={{ color: "#00d4ff" }}>AEGIS différent</span>
           </h2>
-          <p className="font-['Inter'] text-base text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+          <p className="font-['Inter'] text-xs sm:text-base text-muted-foreground max-w-2xl mx-auto leading-relaxed">
             L'idée centrale n'est pas de créer un bot qui trade, mais un système qui apprend à construire et améliorer
             ses propres stratégies de manière contrôlée.
           </p>
         </div>
 
-        <div className="grid sm:grid-cols-2 gap-6 mb-20">
+        <div className="grid sm:grid-cols-2 gap-4 sm:gap-6 mb-12 sm:mb-20">
           {points.map((p) => (
             <div
               key={p.title}
-              className="p-6 border border-border hover:border-primary/30 transition-all duration-300 group"
+              className="p-4 sm:p-6 border border-border hover:border-primary/30 transition-all duration-300 group"
               style={{ background: "rgba(11,18,32,0.7)" }}
             >
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 flex items-center justify-center text-primary" style={{ background: "rgba(0,212,255,0.1)", border: "1px solid rgba(0,212,255,0.2)" }}>
+              <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-primary" style={{ background: "rgba(0,212,255,0.1)", border: "1px solid rgba(0,212,255,0.2)" }}>
                   {p.icon}
                 </div>
-                <h3 className="font-['Rajdhani'] font-700 text-lg text-foreground">{p.title}</h3>
+                <h3 className="font-['Rajdhani'] font-700 text-sm sm:text-lg text-foreground">{p.title}</h3>
               </div>
-              <p className="font-['Inter'] text-sm text-muted-foreground leading-relaxed">{p.desc}</p>
+              <p className="font-['Inter'] text-xs sm:text-sm text-muted-foreground leading-relaxed">{p.desc}</p>
             </div>
           ))}
         </div>
@@ -1045,128 +1058,174 @@ function WhyDifferentSection() {
 function OperationsSection() {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [error, setError] = useState(false);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [lastAlert, setLastAlert] = useState<string | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    const refresh = async () => {
-      try {
-        const data = await getDashboard();
-        if (active) {
-          setSnapshot(data);
-          setError(false);
-        }
-      } catch {
-        if (active) setError(true);
-      }
-    };
-    void refresh();
-    const intervalId = window.setInterval(() => void refresh(), 15_000);
-    return () => { active = false; window.clearInterval(intervalId); };
+  const refresh = useCallback(async () => {
+    try {
+      const data = await getDashboard();
+      setSnapshot(data);
+      setError(false);
+    } catch {
+      setError(true);
+    }
   }, []);
 
+  useEffect(() => {
+    void refresh();
+    const intervalId = window.setInterval(() => void refresh(), 15_000);
+    return () => window.clearInterval(intervalId);
+  }, [refresh]);
+
+  useEffect(() => {
+    const wsUrl = `${(import.meta.env.VITE_API_URL ?? "http://localhost:8000").replace(/^http/, "ws")}/ws/alerts`;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+
+    const connect = () => {
+      try {
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => setWsConnected(true);
+
+        ws.onmessage = (event) => {
+          try {
+            const alert = JSON.parse(event.data);
+            setLastAlert(alert.message ?? JSON.stringify(alert));
+            void refresh();
+          } catch { /* ignore parse errors */ }
+        };
+
+        ws.onclose = () => {
+          setWsConnected(false);
+          reconnectTimer = setTimeout(connect, 5000);
+        };
+
+        ws.onerror = () => ws.close();
+      } catch {
+        reconnectTimer = setTimeout(connect, 5000);
+      }
+    };
+
+    connect();
+
+    return () => {
+      clearTimeout(reconnectTimer);
+      wsRef.current?.close();
+    };
+  }, [refresh]);
+
   return (
-    <section id="operations" className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
-          <div><div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">07 — OPÉRATIONS</div><h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">État <span className="text-primary">AEGIS</span></h2></div>
-          <div className={`font-['JetBrains_Mono'] text-xs ${error ? "text-red-400" : "text-green-400"}`}>{error ? "API INDISPONIBLE" : "ACTUALISATION 15s"}</div>
+    <section id="operations" className="relative py-16 sm:py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-3 sm:gap-4 mb-6 sm:mb-10">
+          <div><div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-2 sm:mb-3">07 — OPÉRATIONS</div><h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-4xl text-foreground">État <span className="text-primary">AEGIS</span></h2></div>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${wsConnected ? "bg-green-400 animate-pulse" : "bg-red-400"}`} />
+              <span className="font-['JetBrains_Mono'] text-[9px] sm:text-[10px] text-muted-foreground">{wsConnected ? "LIVE" : "OFFLINE"}</span>
+            </div>
+            {lastAlert && <span className="font-['JetBrains_Mono'] text-[8px] sm:text-[9px] text-primary/60 max-w-[200px] truncate">{lastAlert}</span>}
+          </div>
+          <div className={`font-['JetBrains_Mono'] text-[10px] sm:text-xs ${error ? "text-red-400" : "text-green-400"}`}>{error ? "API INDISPONIBLE" : "ACTUALISATION 15s"}</div>
         </div>
-        {snapshot && <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {snapshot && <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
           {[
             { label: "Qualité données", value: snapshot.data_quality.valid ? "VALIDE" : "BLOQUÉE", detail: `${snapshot.data_quality.candle_count} bougies · ${snapshot.data_quality.gap_count} trous`, color: snapshot.data_quality.valid ? "#22c55e" : "#ef4444" },
             { label: "Régime marché", value: snapshot.market_analysis?.regime.regime ?? "N/A", detail: `Confiance ${((snapshot.market_analysis?.regime.confidence ?? 0) * 100).toFixed(0)}%`, color: "#00d4ff" },
             { label: "Risque historique", value: snapshot.risk ? `VaR $${snapshot.risk.value_at_risk.toLocaleString("fr-FR")}` : "N/A", detail: snapshot.risk ? `CVaR $${snapshot.risk.conditional_value_at_risk.toLocaleString("fr-FR")}` : "Historique insuffisant", color: "#f59e0b" },
             { label: "Superviseur", value: snapshot.supervisor.kill_switch_active ? "ARRÊT ACTIF" : "SURVEILLÉ", detail: `${snapshot.alerts.length} alertes journalisées`, color: snapshot.supervisor.kill_switch_active ? "#ef4444" : "#22c55e" },
-          ].map((card) => <div key={card.label} className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}><div className="font-['JetBrains_Mono'] text-xs text-muted-foreground mb-3">{card.label.toUpperCase()}</div><div className="font-['Rajdhani'] text-2xl font-700" style={{ color: card.color }}>{card.value}</div><div className="font-['Inter'] text-xs text-muted-foreground mt-2">{card.detail}</div></div>)}
+          ].map((card) => <div key={card.label} className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}><div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground mb-2 sm:mb-3">{card.label.toUpperCase()}</div><div className="font-['Rajdhani'] text-lg sm:text-2xl font-700" style={{ color: card.color }}>{card.value}</div><div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground mt-1 sm:mt-2">{card.detail}</div></div>)}
         </div>}
-        {snapshot && <div className="grid lg:grid-cols-2 gap-4 mt-4">
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">BIBLIOTHÈQUE DE STRATÉGIES</div>
-            <div className="space-y-3">{snapshot.strategy_registry.map((strategy) => <div key={strategy.id} className="flex items-center justify-between gap-3"><div><div className="font-['Inter'] text-sm text-foreground">{strategy.name}</div><div className="font-['JetBrains_Mono'] text-xs text-muted-foreground">{strategy.type}</div></div><span className="font-['JetBrains_Mono'] text-xs text-primary">{strategy.status.toUpperCase()}</span></div>)}</div>
+        {snapshot && <div className="grid lg:grid-cols-2 gap-2 sm:gap-4 mt-2 sm:mt-4">
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">BIBLIOTHÈQUE DE STRATÉGIES</div>
+            <div className="space-y-2 sm:space-y-3">{snapshot.strategy_registry.map((strategy) => <div key={strategy.id} className="flex items-center justify-between gap-2 sm:gap-3"><div><div className="font-['Inter'] text-xs sm:text-sm text-foreground">{strategy.name}</div><div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">{strategy.type}</div></div><span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">{strategy.status.toUpperCase()}</span></div>)}</div>
           </div>
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">COACH & MÉMOIRE</div>
-            <div className="font-['Inter'] text-sm text-foreground mb-3">{snapshot.coach.reviewed_backtests} backtests analysés</div>
-            <div className="space-y-2">{snapshot.coach.recommendations.slice(0, 3).map((item, index) => <div key={`${item.action}-${index}`} className="font-['JetBrains_Mono'] text-xs text-muted-foreground">{item.action.replaceAll("_", " ").toUpperCase()} {item.reason ? `— ${item.reason}` : ""}</div>)}</div>
-            {snapshot.recent_decisions[0] && <div className="mt-4 border-t border-border pt-3 font-['JetBrains_Mono'] text-xs text-muted-foreground">DERNIÈRE DÉCISION: {snapshot.recent_decisions[0].decision.recommendation?.action?.toUpperCase() ?? "N/A"}</div>}
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">COACH & MÉMOIRE</div>
+            <div className="font-['Inter'] text-xs sm:text-sm text-foreground mb-2 sm:mb-3">{snapshot.coach.reviewed_backtests} backtests analysés</div>
+            <div className="space-y-1.5 sm:space-y-2">{snapshot.coach.recommendations.slice(0, 3).map((item, index) => <div key={`${item.action}-${index}`} className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">{item.action.replaceAll("_", " ").toUpperCase()} {item.reason ? `— ${item.reason}` : ""}</div>)}</div>
+            {snapshot.recent_decisions[0] && <div className="mt-3 sm:mt-4 border-t border-border pt-2 sm:pt-3 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">DERNIÈRE DÉCISION: {snapshot.recent_decisions[0].decision.recommendation?.action?.toUpperCase() ?? "N/A"}</div>}
           </div>
         </div>}
-        {snapshot && <div className="grid lg:grid-cols-3 gap-4 mt-4">
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="font-['JetBrains_Mono'] text-xs text-primary">FEAR & GREED</div>
-              <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground">{snapshot.fear_greed[0]?.value ?? "—"}/100</span>
+        {snapshot && <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 mt-2 sm:mt-4">
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
+              <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">FEAR & GREED</div>
+              <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">{snapshot.fear_greed[0]?.value ?? "—"}/100</span>
             </div>
             {snapshot.fear_greed[0] ? (
               <div>
-                <div className="font-['Rajdhani'] text-2xl font-700" style={{ color: (snapshot.fear_greed[0].value ?? 50) < 30 ? "#ef4444" : (snapshot.fear_greed[0].value ?? 50) > 70 ? "#22c55e" : "#f59e0b" }}>
+                <div className="font-['Rajdhani'] text-xl sm:text-2xl font-700" style={{ color: (snapshot.fear_greed[0].value ?? 50) < 30 ? "#ef4444" : (snapshot.fear_greed[0].value ?? 50) > 70 ? "#22c55e" : "#f59e0b" }}>
                   {snapshot.fear_greed[0].classification}
                 </div>
-                <div className="font-['Inter'] text-xs text-muted-foreground mt-1">Source: alternative.me</div>
+                <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground mt-1">Source: alternative.me</div>
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50">Pas de données — cliquer Refresh</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50">Pas de données — cliquer Refresh</div>
             )}
           </div>
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">FUNDING RATE</div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">FUNDING RATE</div>
             {snapshot.funding_rates.length > 0 ? (
-              <div className="space-y-2">
+              <div className="space-y-1.5 sm:space-y-2">
                 {snapshot.funding_rates.slice(0, 3).map((fr) => (
                   <div key={fr.symbol} className="flex items-center justify-between">
-                    <span className="font-['Inter'] text-xs text-foreground">{fr.symbol}</span>
-                    <span className={`font-['JetBrains_Mono'] text-xs ${fr.funding_rate >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    <span className="font-['Inter'] text-[10px] sm:text-xs text-foreground">{fr.symbol}</span>
+                    <span className={`font-['JetBrains_Mono'] text-[10px] sm:text-xs ${fr.funding_rate >= 0 ? "text-green-400" : "text-red-400"}`}>
                       {(fr.funding_rate * 100).toFixed(4)}%
                     </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50">Pas de données</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50">Pas de données</div>
             )}
           </div>
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">OPEN INTEREST</div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">OPEN INTEREST</div>
             {snapshot.open_interest.length > 0 ? (
-              <div className="space-y-2">
+              <div className="space-y-1.5 sm:space-y-2">
                 {snapshot.open_interest.slice(0, 3).map((oi) => (
                   <div key={oi.symbol} className="flex items-center justify-between">
-                    <span className="font-['Inter'] text-xs text-foreground">{oi.symbol}</span>
-                    <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground">
+                    <span className="font-['Inter'] text-[10px] sm:text-xs text-foreground">{oi.symbol}</span>
+                    <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">
                       ${(oi.open_interest_usd / 1_000_000).toFixed(1)}M
                     </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50">Pas de données</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50">Pas de données</div>
             )}
           </div>
         </div>}
-        {snapshot && <div className="border border-border p-5 mt-4" style={{ background: "rgba(11,18,32,0.7)" }}>
-          <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">MÉMOIRE ÉPISODIQUE</div>
-          <div className="grid md:grid-cols-3 gap-4">
+        {snapshot && <div className="border border-border p-3 sm:p-5 mt-2 sm:mt-4" style={{ background: "rgba(11,18,32,0.7)" }}>
+          <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">MÉMOIRE ÉPISODIQUE</div>
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
             <div>
-              <div className="font-['Rajdhani'] text-2xl font-700 text-foreground">{snapshot.memory.total_episodes}</div>
-              <div className="font-['Inter'] text-xs text-muted-foreground">Épisodes enregistrés</div>
+              <div className="font-['Rajdhani'] text-xl sm:text-2xl font-700 text-foreground">{snapshot.memory.total_episodes}</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Épisodes</div>
             </div>
             <div>
-              <div className="font-['Rajdhani'] text-2xl font-700 text-foreground">{snapshot.memory.strategies_used.length}</div>
-              <div className="font-['Inter'] text-xs text-muted-foreground">Stratégies suivies</div>
+              <div className="font-['Rajdhani'] text-xl sm:text-2xl font-700 text-foreground">{snapshot.memory.strategies_used.length}</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Stratégies</div>
             </div>
             <div>
-              <div className="font-['Rajdhani'] text-2xl font-700" style={{ color: (snapshot.memory.avg_result ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>
+              <div className="font-['Rajdhani'] text-xl sm:text-2xl font-700" style={{ color: (snapshot.memory.avg_result ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>
                 {snapshot.memory.avg_result !== null ? `${(snapshot.memory.avg_result * 100).toFixed(2)}%` : "—"}
               </div>
-              <div className="font-['Inter'] text-xs text-muted-foreground">Rendement moyen</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Moyen</div>
             </div>
           </div>
           {snapshot.memory.strategies_used.length > 0 && (
-            <div className="mt-4 border-t border-border pt-3 space-y-2">
+            <div className="mt-3 sm:mt-4 border-t border-border pt-2 sm:pt-3 space-y-1.5 sm:space-y-2">
               {snapshot.memory.strategies_used.map((s) => (
                 <div key={s.strategy} className="flex items-center justify-between">
-                  <span className="font-['Inter'] text-xs text-foreground">{s.strategy}</span>
-                  <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground">
+                  <span className="font-['Inter'] text-[10px] sm:text-xs text-foreground">{s.strategy}</span>
+                  <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">
                     {s.count} épisodes · WR {(s.win_rate * 100).toFixed(0)}%
                   </span>
                 </div>
@@ -1174,52 +1233,52 @@ function OperationsSection() {
             </div>
           )}
         </div>}
-        {snapshot && <div className="grid lg:grid-cols-3 gap-4 mt-4">
+        {snapshot && <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 mt-2 sm:mt-4">
           {/* Stress Test */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">STRESS TEST</div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">STRESS TEST</div>
             {snapshot.stress_test ? (
-              <div className="space-y-2">
+              <div className="space-y-1.5 sm:space-y-2">
                 <div className="flex justify-between">
-                  <span className="font-['Inter'] text-xs text-muted-foreground">Pire jour</span>
-                  <span className="font-['JetBrains_Mono'] text-xs text-red-400">{snapshot.stress_test.worst_day_return.toFixed(1)}%</span>
+                  <span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Pire jour</span>
+                  <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-red-400">{snapshot.stress_test.worst_day_return.toFixed(1)}%</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="font-['Inter'] text-xs text-muted-foreground">Pire semaine</span>
-                  <span className="font-['JetBrains_Mono'] text-xs text-red-400">{snapshot.stress_test.worst_week_return.toFixed(1)}%</span>
+                  <span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Pire semaine</span>
+                  <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-red-400">{snapshot.stress_test.worst_week_return.toFixed(1)}%</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="font-['Inter'] text-xs text-muted-foreground">Pire mois</span>
-                  <span className="font-['JetBrains_Mono'] text-xs text-red-400">{snapshot.stress_test.worst_month_return.toFixed(1)}%</span>
+                  <span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Pire mois</span>
+                  <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-red-400">{snapshot.stress_test.worst_month_return.toFixed(1)}%</span>
                 </div>
-                <div className="border-t border-border pt-2 mt-2">
+                <div className="border-t border-border pt-1.5 sm:pt-2 mt-1.5 sm:mt-2">
                   {snapshot.stress_test.scenarios.slice(0, 3).map((s) => (
-                    <div key={s.name} className="flex justify-between py-1">
-                      <span className="font-['Inter'] text-xs text-muted-foreground">{s.name}</span>
-                      <span className="font-['JetBrains_Mono'] text-xs text-red-400">${Math.abs(s.portfolio_impact).toFixed(0)}</span>
+                    <div key={s.name} className="flex justify-between py-0.5 sm:py-1">
+                      <span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">{s.name}</span>
+                      <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-red-400">${Math.abs(s.portfolio_impact).toFixed(0)}</span>
                     </div>
                   ))}
                 </div>
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50">Pas de données</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50">Pas de données</div>
             )}
           </div>
           {/* Correlation */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">CORRÉLATION</div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">CORRÉLATION</div>
             {snapshot.correlation ? (
-              <div className="space-y-2">
-                <div className="flex justify-between mb-3">
-                  <span className="font-['Inter'] text-xs text-muted-foreground">Moyenne</span>
-                  <span className="font-['JetBrains_Mono'] text-xs text-foreground">{snapshot.correlation.avg_correlation?.toFixed(2) ?? "—"}</span>
+              <div className="space-y-1.5 sm:space-y-2">
+                <div className="flex justify-between mb-2 sm:mb-3">
+                  <span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Moyenne</span>
+                  <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-foreground">{snapshot.correlation.avg_correlation?.toFixed(2) ?? "—"}</span>
                 </div>
-                <div className="font-['Inter'] text-xs text-muted-foreground mb-2">{snapshot.correlation.interpretation}</div>
+                <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground mb-1.5 sm:mb-2">{snapshot.correlation.interpretation}</div>
                 <div className="space-y-1">
                   {snapshot.correlation.symbols.map((sym) => (
-                    <div key={sym} className="flex items-center gap-2">
-                      <span className="font-['JetBrains_Mono'] text-xs text-foreground w-16">{sym.replace("USDT", "")}</span>
-                      <div className="flex-1 h-1.5 rounded-full" style={{ background: "rgba(0,212,255,0.1)" }}>
+                    <div key={sym} className="flex items-center gap-1.5 sm:gap-2">
+                      <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-foreground w-12 sm:w-16">{sym.replace("USDT", "")}</span>
+                      <div className="flex-1 h-1 sm:h-1.5 rounded-full" style={{ background: "rgba(0,212,255,0.1)" }}>
                         <div className="h-full rounded-full" style={{ width: `${Math.abs((snapshot.correlation?.matrix[sym]?.[sym] ?? 1)) * 100}%`, background: "#00d4ff" }} />
                       </div>
                     </div>
@@ -1227,88 +1286,88 @@ function OperationsSection() {
                 </div>
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50">Pas de données</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50">Pas de données</div>
             )}
           </div>
           {/* Concentration */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">CONCENTRATION</div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">CONCENTRATION</div>
             {snapshot.concentration && snapshot.concentration.position_count > 0 ? (
-              <div className="space-y-2">
+              <div className="space-y-1.5 sm:space-y-2">
                 <div className="flex justify-between">
-                  <span className="font-['Inter'] text-xs text-muted-foreground">Exposition totale</span>
-                  <span className="font-['JetBrains_Mono'] text-xs text-foreground">${snapshot.concentration.total_exposure.toLocaleString("fr-FR")}</span>
+                  <span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Exposition totale</span>
+                  <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-foreground">${snapshot.concentration.total_exposure.toLocaleString("fr-FR")}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="font-['Inter'] text-xs text-muted-foreground">HHI</span>
-                  <span className="font-['JetBrains_Mono'] text-xs text-foreground">{snapshot.concentration.herfindahl.toFixed(3)}</span>
+                  <span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">HHI</span>
+                  <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-foreground">{snapshot.concentration.herfindahl.toFixed(3)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="font-['Inter'] text-xs text-muted-foreground">Max concentration</span>
-                  <span className="font-['JetBrains_Mono'] text-xs text-foreground">{snapshot.concentration.max_concentration.toFixed(1)}%</span>
+                  <span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Max concentration</span>
+                  <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-foreground">{snapshot.concentration.max_concentration.toFixed(1)}%</span>
                 </div>
-                <div className="border-t border-border pt-2 mt-2 space-y-1">
+                <div className="border-t border-border pt-1.5 sm:pt-2 mt-1.5 sm:mt-2 space-y-1">
                   {snapshot.concentration.positions.map((p) => (
                     <div key={p.symbol} className="flex justify-between">
-                      <span className="font-['JetBrains_Mono'] text-xs text-foreground">{p.symbol}</span>
-                      <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground">{p.weight}%</span>
+                      <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-foreground">{p.symbol}</span>
+                      <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">{p.weight}%</span>
                     </div>
                   ))}
                 </div>
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50">Aucune position ouverte</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50">Aucune position ouverte</div>
             )}
           </div>
         </div>}
-        {snapshot && snapshot.journal && <div className="border border-border p-5 mt-4" style={{ background: "rgba(11,18,32,0.7)" }}>
-          <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">JOURNAL DE DÉCISIONS</div>
-          <div className="grid md:grid-cols-4 gap-4 mb-4">
+        {snapshot && snapshot.journal && <div className="border border-border p-3 sm:p-5 mt-2 sm:mt-4" style={{ background: "rgba(11,18,32,0.7)" }}>
+          <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">JOURNAL DE DÉCISIONS</div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4 mb-3 sm:mb-4">
             <div>
-              <div className="font-['Rajdhani'] text-2xl font-700 text-foreground">{snapshot.journal.total_decisions}</div>
-              <div className="font-['Inter'] text-xs text-muted-foreground">Décisions totales</div>
+              <div className="font-['Rajdhani'] text-xl sm:text-2xl font-700 text-foreground">{snapshot.journal.total_decisions}</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Décisions</div>
             </div>
             <div>
-              <div className="font-['Rajdhani'] text-2xl font-700" style={{ color: (snapshot.journal.accuracy ?? 0) >= 0.5 ? "#22c55e" : "#ef4444" }}>
+              <div className="font-['Rajdhani'] text-xl sm:text-2xl font-700" style={{ color: (snapshot.journal.accuracy ?? 0) >= 0.5 ? "#22c55e" : "#ef4444" }}>
                 {snapshot.journal.accuracy !== null ? `${(snapshot.journal.accuracy * 100).toFixed(0)}%` : "—"}
               </div>
-              <div className="font-['Inter'] text-xs text-muted-foreground">Précision</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Précision</div>
             </div>
             <div>
-              <div className="font-['Rajdhani'] text-2xl font-700" style={{ color: (snapshot.journal.avg_pnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>
+              <div className="font-['Rajdhani'] text-xl sm:text-2xl font-700" style={{ color: (snapshot.journal.avg_pnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>
                 {snapshot.journal.avg_pnl !== null ? `${(snapshot.journal.avg_pnl * 100).toFixed(2)}%` : "—"}
               </div>
-              <div className="font-['Inter'] text-xs text-muted-foreground">PnL moyen</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">PnL moyen</div>
             </div>
             <div>
-              <div className="font-['Rajdhani'] text-lg font-700 text-primary">{snapshot.journal.feedback.grade}</div>
-              <div className="font-['Inter'] text-xs text-muted-foreground">Évaluation</div>
+              <div className="font-['Rajdhani'] text-base sm:text-lg font-700 text-primary">{snapshot.journal.feedback?.grade ?? "—"}</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Évaluation</div>
             </div>
           </div>
-          {snapshot.journal.feedback.strengths.length > 0 && (
-            <div className="mb-3">
-              <div className="font-['JetBrains_Mono'] text-xs text-green-400 mb-1">FORCES</div>
-              {snapshot.journal.feedback.strengths.map((s, i) => (
-                <div key={i} className="font-['Inter'] text-xs text-muted-foreground">+ {s}</div>
+          {(snapshot.journal.feedback?.strengths?.length ?? 0) > 0 && (
+            <div className="mb-2 sm:mb-3">
+              <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-green-400 mb-0.5 sm:mb-1">FORCES</div>
+              {snapshot.journal.feedback?.strengths?.map((s, i) => (
+                <div key={i} className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">+ {s}</div>
               ))}
             </div>
           )}
-          {snapshot.journal.feedback.weaknesses.length > 0 && (
+          {(snapshot.journal.feedback?.weaknesses?.length ?? 0) > 0 && (
             <div>
-              <div className="font-['JetBrains_Mono'] text-xs text-red-400 mb-1">POINTS D'AMÉLIORATION</div>
-              {snapshot.journal.feedback.weaknesses.map((w, i) => (
-                <div key={i} className="font-['Inter'] text-xs text-muted-foreground">- {w}</div>
+              <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-red-400 mb-0.5 sm:mb-1">POINTS D'AMÉLIORATION</div>
+              {snapshot.journal.feedback?.weaknesses?.map((w, i) => (
+                <div key={i} className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">- {w}</div>
               ))}
             </div>
           )}
           {Object.keys(snapshot.journal.by_action).length > 0 && (
-            <div className="mt-4 border-t border-border pt-3">
-              <div className="font-['JetBrains_Mono'] text-xs text-primary mb-2">PAR ACTION</div>
+            <div className="mt-3 sm:mt-4 border-t border-border pt-2 sm:pt-3">
+              <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-1.5 sm:mb-2">PAR ACTION</div>
               <div className="space-y-1">
                 {Object.entries(snapshot.journal.by_action).map(([action, data]) => (
                   <div key={action} className="flex items-center justify-between">
-                    <span className="font-['Inter'] text-xs text-foreground">{action}</span>
-                    <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground">
+                    <span className="font-['Inter'] text-[10px] sm:text-xs text-foreground">{action}</span>
+                    <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">
                       {data.count}× · WR {(data.accuracy * 100).toFixed(0)}% {data.avg_pnl !== null ? `· PnL ${(data.avg_pnl * 100).toFixed(2)}%` : ""}
                     </span>
                   </div>
@@ -1356,99 +1415,99 @@ function MLRegimeSection() {
   };
 
   return (
-    <section className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
+    <section className="relative py-16 sm:py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-3 sm:gap-4 mb-6 sm:mb-10">
           <div>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">08 — ML RÉGIME</div>
-            <h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">Prédiction <span className="text-primary">Machine Learning</span></h2>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-2 sm:mb-3">08 — ML RÉGIME</div>
+            <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-4xl text-foreground">Prédiction <span className="text-primary">Machine Learning</span></h2>
           </div>
-          <button onClick={handleTrain} disabled={training} className="px-4 py-2 font-['JetBrains_Mono'] text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
+          <button onClick={handleTrain} disabled={training} className="px-3 sm:px-4 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
             {training ? "ENTRAÎNEMENT…" : "ENTRAÎNER LE MODÈLE"}
           </button>
         </div>
 
-        {error && <div className="mb-4 p-3 border border-red-400/30 bg-red-400/5 font-['JetBrains_Mono'] text-xs text-red-400">{error}</div>}
+        {error && <div className="mb-3 sm:mb-4 p-2 sm:p-3 border border-red-400/30 bg-red-400/5 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-red-400">{error}</div>}
 
-        <div className="grid lg:grid-cols-3 gap-4">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
           {/* Model Status */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">MODÈLE</div>
-            <div className="flex items-center gap-2 mb-3">
-              <span className={`w-2 h-2 rounded-full ${summary?.trained ? "bg-green-400" : "bg-muted-foreground/30"}`} />
-              <span className="font-['Inter'] text-sm text-foreground">{summary?.trained ? "Entraîné" : "Non entraîné"}</span>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">MODÈLE</div>
+            <div className="flex items-center gap-2 mb-2 sm:mb-3">
+              <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${summary?.trained ? "bg-green-400" : "bg-muted-foreground/30"}`} />
+              <span className="font-['Inter'] text-xs sm:text-sm text-foreground">{summary?.trained ? "Entraîné" : "Non entraîné"}</span>
             </div>
-            <div className="space-y-2 font-['JetBrains_Mono'] text-xs text-muted-foreground">
+            <div className="space-y-1.5 sm:space-y-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">
               <div>Features: {summary?.n_features ?? 0}</div>
               <div>Classes: {summary?.n_classes ?? 0}</div>
-              <div>Nom: {summary?.feature_names?.join(", ") ?? "—"}</div>
+              <div className="truncate">Nom: {summary?.feature_names?.join(", ") ?? "—"}</div>
             </div>
           </div>
 
           {/* Current Prediction */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">PRÉDICTION ACTUELLE</div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">PRÉDICTION ACTUELLE</div>
             {prediction?.ml_prediction ? (
               <div>
-                <div className="font-['Rajdhani'] text-3xl font-700 mb-2" style={{ color: regimeColors[prediction.ml_prediction.regime] ?? "#00d4ff" }}>
+                <div className="font-['Rajdhani'] text-2xl sm:text-3xl font-700 mb-1.5 sm:mb-2" style={{ color: regimeColors[prediction.ml_prediction.regime] ?? "#00d4ff" }}>
                   {prediction.ml_prediction.regime?.replace("_", " ").toUpperCase() ?? "N/A"}
                 </div>
-                <div className="font-['JetBrains_Mono'] text-xs text-muted-foreground mb-3">
+                <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground mb-2 sm:mb-3">
                   Confiance: {(prediction.ml_prediction.confidence * 100).toFixed(1)}%
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground">Rule-based:</span>
-                  <span className="font-['JetBrains_Mono'] text-xs" style={{ color: regimeColors[prediction.rule_based?.regime] ?? "#6b7fa3" }}>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">Rule-based:</span>
+                  <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs" style={{ color: regimeColors[prediction.rule_based?.regime] ?? "#6b7fa3" }}>
                     {prediction.rule_based?.regime?.replace("_", " ").toUpperCase() ?? "N/A"}
                   </span>
                   {prediction.agreement ? (
-                    <span className="font-['JetBrains_Mono'] text-xs text-green-400">✓ Accord</span>
+                    <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-green-400">✓</span>
                   ) : (
-                    <span className="font-['JetBrains_Mono'] text-xs text-yellow-400">✗ Différent</span>
+                    <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-yellow-400">✗</span>
                   )}
                 </div>
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50">Pas de prédiction</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50">Pas de prédiction</div>
             )}
           </div>
 
           {/* Feature Importance */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">FEATURE IMPORTANCE</div>
+          <div className="border border-border p-3 sm:p-5 sm:col-span-2 lg:col-span-1" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">FEATURE IMPORTANCE</div>
             {summary?.feature_importance && Object.keys(summary.feature_importance).length > 0 ? (
-              <div className="space-y-2">
+              <div className="space-y-1.5 sm:space-y-2">
                 {Object.entries(summary.feature_importance)
                   .sort(([, a], [, b]) => b - a)
                   .slice(0, 6)
                   .map(([name, value]) => (
-                    <div key={name} className="flex items-center gap-2">
-                      <span className="font-['JetBrains_Mono'] text-xs text-foreground w-20 truncate">{name}</span>
-                      <div className="flex-1 h-1.5 rounded-full" style={{ background: "rgba(0,212,255,0.1)" }}>
+                    <div key={name} className="flex items-center gap-1.5 sm:gap-2">
+                      <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-foreground w-16 sm:w-20 truncate">{name}</span>
+                      <div className="flex-1 h-1 sm:h-1.5 rounded-full" style={{ background: "rgba(0,212,255,0.1)" }}>
                         <div className="h-full rounded-full transition-all" style={{ width: `${value * 100}%`, background: "#00d4ff" }} />
                       </div>
-                      <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground w-10 text-right">{(value * 100).toFixed(0)}%</span>
+                      <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground w-8 sm:w-10 text-right">{(value * 100).toFixed(0)}%</span>
                     </div>
                   ))}
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50">Entraîner le modèle d'abord</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50">Entraîner le modèle d'abord</div>
             )}
           </div>
         </div>
 
         {/* Probability Distribution */}
         {prediction?.ml_prediction?.probabilities && (
-          <div className="border border-border p-5 mt-4" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">DISTRIBUTION DES PROBABILITÉS</div>
-            <div className="grid grid-cols-7 gap-2">
+          <div className="border border-border p-3 sm:p-5 mt-2 sm:mt-4" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">DISTRIBUTION DES PROBABILITÉS</div>
+            <div className="grid grid-cols-7 gap-1 sm:gap-2">
               {Object.entries(prediction.ml_prediction.probabilities).map(([regime, prob]) => (
                 <div key={regime} className="text-center">
-                  <div className="h-24 relative mx-auto w-full" style={{ background: "rgba(0,212,255,0.06)", border: "1px solid rgba(0,212,255,0.12)" }}>
+                  <div className="h-16 sm:h-24 relative mx-auto w-full" style={{ background: "rgba(0,212,255,0.06)", border: "1px solid rgba(0,212,255,0.12)" }}>
                     <div className="absolute bottom-0 left-0 right-0 transition-all" style={{ height: `${(prob as number) * 100}%`, background: regimeColors[regime] ?? "#00d4ff", opacity: 0.7 }} />
-                    <div className="absolute inset-0 flex items-center justify-center font-['JetBrains_Mono'] text-xs text-foreground z-10">{((prob as number) * 100).toFixed(0)}%</div>
+                    <div className="absolute inset-0 flex items-center justify-center font-['JetBrains_Mono'] text-[9px] sm:text-xs text-foreground z-10">{((prob as number) * 100).toFixed(0)}%</div>
                   </div>
-                  <div className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground mt-1 truncate">{regime.replace("_", " ")}</div>
+                  <div className="font-['JetBrains_Mono'] text-[8px] sm:text-[10px] text-muted-foreground mt-0.5 sm:mt-1 truncate">{regime.replace("_", " ")}</div>
                 </div>
               ))}
             </div>
@@ -1505,55 +1564,55 @@ function AlertsSection() {
   };
 
   return (
-    <section className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
+    <section className="relative py-16 sm:py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-3 sm:gap-4 mb-6 sm:mb-10">
           <div>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">09 — ALERTES TEMPS RÉEL</div>
-            <h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">Monitoring <span className="text-primary">WebSocket</span></h2>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-2 sm:mb-3">09 — ALERTES TEMPS RÉEL</div>
+            <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-4xl text-foreground">Monitoring <span className="text-primary">WebSocket</span></h2>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1.5 text-xs font-['JetBrains_Mono'] text-green-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />WS LIVE
+          <div className="flex items-center gap-2 sm:gap-3">
+            <span className="flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs font-['JetBrains_Mono'] text-green-400">
+              <span className="w-1 sm:w-1.5 h-1 sm:h-1.5 rounded-full bg-green-400 animate-pulse" />WS LIVE
             </span>
-            <button onClick={handleCheck} disabled={checking} className="px-4 py-2 font-['JetBrains_Mono'] text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
-              {checking ? "VÉRIFICATION…" : "VÉRIFIER MAINTENANT"}
+            <button onClick={handleCheck} disabled={checking} className="px-3 sm:px-4 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
+              {checking ? "VÉRIFICATION…" : "VÉRIFIER"}
             </button>
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-4">
+        <div className="grid lg:grid-cols-2 gap-2 sm:gap-4">
           {/* Live Alerts Feed */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">FLUX TEMPS RÉEL</div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">FLUX TEMPS RÉEL</div>
             {liveAlerts.length > 0 ? (
-              <div className="space-y-2 max-h-80 overflow-y-auto">
+              <div className="space-y-1.5 sm:space-y-2 max-h-60 sm:max-h-80 overflow-y-auto">
                 {liveAlerts.map((alert, i) => (
-                  <div key={i} className="flex items-start gap-2 p-2 border border-border/50">
-                    <span className="w-2 h-2 rounded-full shrink-0 mt-1" style={{ background: severityColors[alert.type?.split("_")[0] ?? "info"] ?? "#6b7fa3" }} />
+                  <div key={i} className="flex items-start gap-1.5 sm:gap-2 p-1.5 sm:p-2 border border-border/50">
+                    <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full shrink-0 mt-0.5 sm:mt-1" style={{ background: severityColors[alert.type?.split("_")[0] ?? "info"] ?? "#6b7fa3" }} />
                     <div className="flex-1 min-w-0">
-                      <div className="font-['JetBrains_Mono'] text-xs text-foreground truncate">{alert.message}</div>
-                      <div className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground">{alert.timestamp?.split("T")[1]?.split(".")[0] ?? ""}</div>
+                      <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-foreground truncate">{alert.message}</div>
+                      <div className="font-['JetBrains_Mono'] text-[8px] sm:text-[10px] text-muted-foreground">{alert.timestamp?.split("T")[1]?.split(".")[0] ?? ""}</div>
                     </div>
-                    <span className="font-['JetBrains_Mono'] text-[10px] px-1.5 py-0.5" style={{ background: `${severityColors[alert.type?.split("_")[0] ?? "info"]}20`, color: severityColors[alert.type?.split("_")[0] ?? "info"] ?? "#6b7fa3" }}>
+                    <span className="font-['JetBrains_Mono'] text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-0.5 shrink-0" style={{ background: `${severityColors[alert.type?.split("_")[0] ?? "info"]}20`, color: severityColors[alert.type?.split("_")[0] ?? "info"] ?? "#6b7fa3" }}>
                       {alert.type?.split("_")[0]?.toUpperCase() ?? "INFO"}
                     </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50 py-8 text-center">En attente d'alertes…</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-6 sm:py-8 text-center">En attente d'alertes…</div>
             )}
           </div>
 
           {/* Thresholds */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">SEUILS DE DÉCLENCHEMENT</div>
-            <div className="space-y-2">
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">SEUILS DE DÉCLENCHEMENT</div>
+            <div className="space-y-1.5 sm:space-y-2">
               {Object.entries(thresholds).map(([key, value]) => (
-                <div key={key} className="flex items-center justify-between py-1.5 border-b border-border/30 last:border-0">
-                  <span className="font-['Inter'] text-xs text-foreground">{key.replace(/_/g, " ")}</span>
-                  <span className="font-['JetBrains_Mono'] text-xs text-primary">{typeof value === "boolean" ? (value ? "ON" : "OFF") : typeof value === "number" ? value.toLocaleString() : String(value)}</span>
+                <div key={key} className="flex items-center justify-between py-1 sm:py-1.5 border-b border-border/30 last:border-0">
+                  <span className="font-['Inter'] text-[10px] sm:text-xs text-foreground">{key.replace(/_/g, " ")}</span>
+                  <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">{typeof value === "boolean" ? (value ? "ON" : "OFF") : typeof value === "number" ? value.toLocaleString() : String(value)}</span>
                 </div>
               ))}
             </div>
@@ -1562,13 +1621,13 @@ function AlertsSection() {
 
         {/* Alert History */}
         {alerts.length > 0 && (
-          <div className="border border-border p-5 mt-4" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">HISTORIQUE ({alerts.length})</div>
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-2">
+          <div className="border border-border p-3 sm:p-5 mt-2 sm:mt-4" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">HISTORIQUE ({alerts.length})</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 sm:gap-2">
               {alerts.slice(0, 12).map((alert, i) => (
-                <div key={i} className="flex items-center gap-2 p-2 border border-border/30">
+                <div key={i} className="flex items-center gap-1.5 sm:gap-2 p-1.5 sm:p-2 border border-border/30">
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: severityColors[alert.severity] ?? "#6b7fa3" }} />
-                  <span className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground truncate">{alert.message}</span>
+                  <span className="font-['JetBrains_Mono'] text-[9px] sm:text-[10px] text-muted-foreground truncate">{alert.message}</span>
                 </div>
               ))}
             </div>
@@ -1595,94 +1654,94 @@ function AdvancedBacktestSection() {
   };
 
   return (
-    <section className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
+    <section className="relative py-16 sm:py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-3 sm:gap-4 mb-6 sm:mb-10">
           <div>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">10 — BACKTEST AVANCÉ</div>
-            <h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">Walk-Forward & <span className="text-primary">Monte Carlo</span></h2>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-2 sm:mb-3">10 — BACKTEST AVANCÉ</div>
+            <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-4xl text-foreground">Walk-Forward & <span className="text-primary">Monte Carlo</span></h2>
           </div>
-          <div className="flex gap-2">
-            <button onClick={handleWalkForward} disabled={loading !== null} className="px-4 py-2 font-['JetBrains_Mono'] text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
+          <div className="flex gap-1.5 sm:gap-2">
+            <button onClick={handleWalkForward} disabled={loading !== null} className="px-3 sm:px-4 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
               {loading === "wf" ? "EN COURS…" : "WALK-FORWARD"}
             </button>
-            <button onClick={handleMonteCarlo} disabled={loading !== null} className="px-4 py-2 font-['JetBrains_Mono'] text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
+            <button onClick={handleMonteCarlo} disabled={loading !== null} className="px-3 sm:px-4 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
               {loading === "mc" ? "EN COURS…" : "MONTE CARLO"}
             </button>
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-4">
+        <div className="grid lg:grid-cols-2 gap-2 sm:gap-4">
           {/* Walk-Forward */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">WALK-FORWARD OPTIMIZATION</div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">WALK-FORWARD OPTIMIZATION</div>
             {walkForward ? (
               <div>
-                <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-3 sm:mb-4">
                   <div>
-                    <div className="font-['Rajdhani'] text-xl font-700" style={{ color: walkForward.avg_oos_sharpe > 0 ? "#22c55e" : "#ef4444" }}>
+                    <div className="font-['Rajdhani'] text-lg sm:text-xl font-700" style={{ color: walkForward.avg_oos_sharpe > 0 ? "#22c55e" : "#ef4444" }}>
                       {walkForward.avg_oos_sharpe?.toFixed(2) ?? "—"}
                     </div>
-                    <div className="font-['Inter'] text-[10px] text-muted-foreground">Sharpe moyen OOS</div>
+                    <div className="font-['Inter'] text-[8px] sm:text-[10px] text-muted-foreground">Sharpe OOS</div>
                   </div>
                   <div>
-                    <div className="font-['Rajdhani'] text-xl font-700" style={{ color: walkForward.avg_oos_return > 0 ? "#22c55e" : "#ef4444" }}>
+                    <div className="font-['Rajdhani'] text-lg sm:text-xl font-700" style={{ color: walkForward.avg_oos_return > 0 ? "#22c55e" : "#ef4444" }}>
                       {((walkForward.avg_oos_return ?? 0) * 100).toFixed(2)}%
                     </div>
-                    <div className="font-['Inter'] text-[10px] text-muted-foreground">Rendement moyen OOS</div>
+                    <div className="font-['Inter'] text-[8px] sm:text-[10px] text-muted-foreground">Return OOS</div>
                   </div>
                   <div>
-                    <div className="font-['Rajdhani'] text-xl font-700 text-primary">{walkForward.robustness?.toUpperCase() ?? "—"}</div>
-                    <div className="font-['Inter'] text-[10px] text-muted-foreground">Robustesse</div>
+                    <div className="font-['Rajdhani'] text-lg sm:text-xl font-700 text-primary">{walkForward.robustness?.toUpperCase() ?? "—"}</div>
+                    <div className="font-['Inter'] text-[8px] sm:text-[10px] text-muted-foreground">Robustesse</div>
                   </div>
                 </div>
                 {walkForward.splits?.map((split: any) => (
-                  <div key={split.split} className="flex items-center justify-between py-1.5 border-b border-border/30">
-                    <span className="font-['JetBrains_Mono'] text-xs text-foreground">Split {split.split}</span>
-                    <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground">
+                  <div key={split.split} className="flex items-center justify-between py-1 sm:py-1.5 border-b border-border/30">
+                    <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-foreground">Split {split.split}</span>
+                    <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">
                       Sharpe: {split.oos_metrics?.sharpe_ratio?.toFixed(2) ?? "—"} · Return: {((split.oos_metrics?.total_return ?? 0) * 100).toFixed(2)}%
                     </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50 py-8 text-center">Cliquer Walk-Forward pour lancer</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-6 sm:py-8 text-center">Cliquer Walk-Forward pour lancer</div>
             )}
           </div>
 
           {/* Monte Carlo */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">MONTE CARLO SIMULATION</div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">MONTE CARLO SIMULATION</div>
             {monteCarlo ? (
               <div>
-                <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-3 sm:mb-4">
                   <div>
-                    <div className="font-['Rajdhani'] text-xl font-700" style={{ color: (monteCarlo.probability_of_profit ?? 0) > 0.5 ? "#22c55e" : "#ef4444" }}>
+                    <div className="font-['Rajdhani'] text-lg sm:text-xl font-700" style={{ color: (monteCarlo.probability_of_profit ?? 0) > 0.5 ? "#22c55e" : "#ef4444" }}>
                       {((monteCarlo.probability_of_profit ?? 0) * 100).toFixed(0)}%
                     </div>
-                    <div className="font-['Inter'] text-[10px] text-muted-foreground">Prob. profit</div>
+                    <div className="font-['Inter'] text-[8px] sm:text-[10px] text-muted-foreground">Prob. profit</div>
                   </div>
                   <div>
-                    <div className="font-['Rajdhani'] text-xl font-700" style={{ color: (monteCarlo.probability_of_ruin ?? 0) > 0.1 ? "#ef4444" : "#22c55e" }}>
+                    <div className="font-['Rajdhani'] text-lg sm:text-xl font-700" style={{ color: (monteCarlo.probability_of_ruin ?? 0) > 0.1 ? "#ef4444" : "#22c55e" }}>
                       {((monteCarlo.probability_of_ruin ?? 0) * 100).toFixed(1)}%
                     </div>
-                    <div className="font-['Inter'] text-[10px] text-muted-foreground">Prob. ruine</div>
+                    <div className="font-['Inter'] text-[8px] sm:text-[10px] text-muted-foreground">Prob. ruine</div>
                   </div>
                   <div>
-                    <div className="font-['Rajdhani'] text-xl font-700 text-primary">{monteCarlo.n_simulations?.toLocaleString() ?? "—"}</div>
-                    <div className="font-['Inter'] text-[10px] text-muted-foreground">Simulations</div>
+                    <div className="font-['Rajdhani'] text-lg sm:text-xl font-700 text-primary">{monteCarlo.n_simulations?.toLocaleString() ?? "—"}</div>
+                    <div className="font-['Inter'] text-[8px] sm:text-[10px] text-muted-foreground">Simulations</div>
                   </div>
                 </div>
                 {monteCarlo.return_distribution?.percentiles && (
-                  <div className="mt-3">
-                    <div className="font-['JetBrains_Mono'] text-[10px] text-primary mb-2">DISTRIBUTION DES RETURNS</div>
-                    <div className="flex gap-1">
+                  <div className="mt-2 sm:mt-3">
+                    <div className="font-['JetBrains_Mono'] text-[9px] sm:text-[10px] text-primary mb-1.5 sm:mb-2">DISTRIBUTION DES RETURNS</div>
+                    <div className="flex gap-0.5 sm:gap-1">
                       {Object.entries(monteCarlo.return_distribution.percentiles).map(([p, val]) => (
                         <div key={p} className="flex-1 text-center">
-                          <div className="h-12 relative mx-auto" style={{ background: "rgba(0,212,255,0.06)" }}>
+                          <div className="h-8 sm:h-12 relative mx-auto" style={{ background: "rgba(0,212,255,0.06)" }}>
                             <div className="absolute bottom-0 left-0 right-0" style={{ height: `${Math.abs((val as number) * 500)}%`, background: (val as number) > 0 ? "#22c55e" : "#ef4444", opacity: 0.6 }} />
                           </div>
-                          <div className="font-['JetBrains_Mono'] text-[9px] text-muted-foreground mt-1">{p}</div>
+                          <div className="font-['JetBrains_Mono'] text-[7px] sm:text-[9px] text-muted-foreground mt-0.5 sm:mt-1">{p}</div>
                         </div>
                       ))}
                     </div>
@@ -1690,7 +1749,7 @@ function AdvancedBacktestSection() {
                 )}
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50 py-8 text-center">Cliquer Monte Carlo pour lancer</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-6 sm:py-8 text-center">Cliquer Monte Carlo pour lancer</div>
             )}
           </div>
         </div>
@@ -1709,23 +1768,23 @@ function BinanceTestnetSection() {
   }, []);
 
   return (
-    <section className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
+    <section className="relative py-16 sm:py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-3 sm:gap-4 mb-6 sm:mb-10">
           <div>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">11 — BINANCE TESTNET</div>
-            <h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">Trading <span className="text-primary">Testnet</span></h2>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-2 sm:mb-3">11 — BINANCE TESTNET</div>
+            <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-4xl text-foreground">Trading <span className="text-primary">Testnet</span></h2>
           </div>
-          <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${status?.connected ? "bg-green-400" : "bg-red-400"}`} />
-            <span className="font-['JetBrains_Mono'] text-xs text-muted-foreground">{status?.connected ? "CONNECTÉ" : "DÉCONNECTÉ"}</span>
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${status?.connected ? "bg-green-400" : "bg-red-400"}`} />
+            <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">{status?.connected ? "CONNECTÉ" : "DÉCONNECTÉ"}</span>
           </div>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-4">
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-3">CONNECTION</div>
-            <div className="space-y-2 font-['JetBrains_Mono'] text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4">
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-2 sm:mb-3">CONNECTION</div>
+            <div className="space-y-1.5 sm:space-y-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Status</span>
                 <span className={status?.connected ? "text-green-400" : "text-red-400"}>{status?.connected ? "OK" : "ERROR"}</span>
@@ -1741,24 +1800,24 @@ function BinanceTestnetSection() {
             </div>
           </div>
 
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-3">PRIX BTC</div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-2 sm:mb-3">PRIX BTC</div>
             {btcPrice?.price ? (
-              <div className="font-['Rajdhani'] text-3xl font-700 text-foreground">
+              <div className="font-['Rajdhani'] text-2xl sm:text-3xl font-700 text-foreground">
                 ${parseFloat(btcPrice.price).toLocaleString("fr-FR", { maximumFractionDigits: 0 })}
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50">Indisponible</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50">Indisponible</div>
             )}
-            <div className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground mt-2">Source: Binance Testnet</div>
+            <div className="font-['JetBrains_Mono'] text-[8px] sm:text-[10px] text-muted-foreground mt-1.5 sm:mt-2">Source: Binance Testnet</div>
           </div>
 
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-3">INFO</div>
-            <div className="font-['Inter'] text-xs text-muted-foreground leading-relaxed">
-              Le testnet Binance permet de trader sans risque. Configurez vos clés API testnet dans les variables d'environnement :
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-2 sm:mb-3">INFO</div>
+            <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground leading-relaxed">
+              Configurez vos clés API testnet dans les variables d'environnement :
             </div>
-            <div className="mt-2 font-['JetBrains_Mono'] text-[10px] text-primary">
+            <div className="mt-1.5 sm:mt-2 font-['JetBrains_Mono'] text-[9px] sm:text-[10px] text-primary">
               BINANCE_TESTNET_API_KEY=...<br />
               BINANCE_TESTNET_API_SECRET=...
             </div>
@@ -1781,66 +1840,66 @@ function MultiAssetSection() {
   }, []);
 
   return (
-    <section className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="mb-10">
-          <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">12 — MULTI-ACTIFS</div>
-          <h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">Forex, Commodities & <span className="text-primary">Stocks</span></h2>
+    <section className="relative py-16 sm:py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="mb-6 sm:mb-10">
+          <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-2 sm:mb-3">12 — MULTI-ACTIFS</div>
+          <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-4xl text-foreground">Forex, Commodities & <span className="text-primary">Stocks</span></h2>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-4">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
           {/* Asset Classes */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">CLASSES D'ACTIFS</div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">CLASSES D'ACTIFS</div>
             {assetClasses ? (
-              <div className="space-y-3">
+              <div className="space-y-2.5 sm:space-y-3">
                 {Object.entries(assetClasses).map(([key, cls]: [string, any]) => (
                   <div key={key}>
-                    <div className="font-['Inter'] text-sm text-foreground mb-1">{cls.name}</div>
+                    <div className="font-['Inter'] text-xs sm:text-sm text-foreground mb-1">{cls.name}</div>
                     <div className="flex flex-wrap gap-1">
                       {cls.symbols.map((s: string) => (
-                        <span key={s} className="font-['JetBrains_Mono'] text-[10px] px-1.5 py-0.5" style={{ background: "rgba(0,212,255,0.06)", color: "#e8edf5", border: "1px solid rgba(0,212,255,0.12)" }}>{s}</span>
+                        <span key={s} className="font-['JetBrains_Mono'] text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.5" style={{ background: "rgba(0,212,255,0.06)", color: "#e8edf5", border: "1px solid rgba(0,212,255,0.12)" }}>{s}</span>
                       ))}
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50">Chargement…</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50">Chargement…</div>
             )}
           </div>
 
           {/* Commodities */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">COMMODITIES</div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">COMMODITIES</div>
             {commodities.length > 0 ? (
-              <div className="space-y-2">
+              <div className="space-y-1.5 sm:space-y-2">
                 {commodities.map((c) => (
-                  <div key={c.symbol} className="flex items-center justify-between py-1.5 border-b border-border/30">
-                    <span className="font-['Inter'] text-xs text-foreground">{c.symbol}</span>
-                    <span className="font-['JetBrains_Mono'] text-xs text-primary">${c.price?.toLocaleString("fr-FR") ?? "—"}</span>
+                  <div key={c.symbol} className="flex items-center justify-between py-1 sm:py-1.5 border-b border-border/30">
+                    <span className="font-['Inter'] text-[10px] sm:text-xs text-foreground">{c.symbol}</span>
+                    <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">${c.price?.toLocaleString("fr-FR") ?? "—"}</span>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50">Pas de données</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50">Pas de données</div>
             )}
           </div>
 
           {/* Forex */}
-          <div className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary mb-4">FOREX (USD)</div>
+          <div className="border border-border p-3 sm:p-5 sm:col-span-2 lg:col-span-1" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">FOREX (USD)</div>
             {forex?.rates ? (
-              <div className="space-y-2">
+              <div className="space-y-1.5 sm:space-y-2">
                 {["EUR", "GBP", "JPY", "AUD", "CAD", "CHF"].map((code) => (
-                  <div key={code} className="flex items-center justify-between py-1.5 border-b border-border/30">
-                    <span className="font-['Inter'] text-xs text-foreground">USD/{code}</span>
-                    <span className="font-['JetBrains_Mono'] text-xs text-primary">{forex.rates[code]?.toFixed(4) ?? "—"}</span>
+                  <div key={code} className="flex items-center justify-between py-1 sm:py-1.5 border-b border-border/30">
+                    <span className="font-['Inter'] text-[10px] sm:text-xs text-foreground">USD/{code}</span>
+                    <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">{forex.rates[code]?.toFixed(4) ?? "—"}</span>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="font-['Inter'] text-xs text-muted-foreground/50">Pas de données</div>
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50">Pas de données</div>
             )}
           </div>
         </div>
@@ -1866,28 +1925,28 @@ function OptimizerSection() {
   };
 
   return (
-    <section className="relative py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
+    <section className="relative py-16 sm:py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-3 sm:gap-4 mb-6 sm:mb-10">
           <div>
-            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-3">13 — OPTIMIZER</div>
-            <h2 className="font-['Rajdhani'] font-700 text-4xl text-foreground">Grid Search <span className="text-primary">Multi-Stratégies</span></h2>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-2 sm:mb-3">13 — OPTIMIZER</div>
+            <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-4xl text-foreground">Grid Search <span className="text-primary">Multi-Stratégies</span></h2>
           </div>
-          <button onClick={handleOptimize} disabled={loading} className="px-4 py-2 font-['JetBrains_Mono'] text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
+          <button onClick={handleOptimize} disabled={loading} className="px-3 sm:px-4 py-1.5 sm:py-2 font-['JetBrains_Mono'] text-[10px] sm:text-xs border border-primary/30 text-primary disabled:opacity-50 hover:bg-primary/5 transition-all">
             {loading ? "OPTIMISATION…" : "OPTIMISER TOUT"}
           </button>
         </div>
 
         {results?.ranking && (
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
             {results.ranking.map((s: any, i: number) => (
-              <div key={s.strategy} className="border border-border p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="font-['JetBrains_Mono'] text-xs text-primary">#{i + 1}</div>
-                  {i === 0 && <span className="font-['JetBrains_Mono'] text-[10px] px-1.5 py-0.5 bg-primary/20 text-primary">BEST</span>}
+              <div key={s.strategy} className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+                <div className="flex items-center justify-between mb-2 sm:mb-3">
+                  <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">#{i + 1}</div>
+                  {i === 0 && <span className="font-['JetBrains_Mono'] text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-0.5 bg-primary/20 text-primary">BEST</span>}
                 </div>
-                <div className="font-['Inter'] text-sm text-foreground mb-3">{s.strategy.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}</div>
-                <div className="space-y-1.5 font-['JetBrains_Mono'] text-xs">
+                <div className="font-['Inter'] text-xs sm:text-sm text-foreground mb-2 sm:mb-3">{s.strategy.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}</div>
+                <div className="space-y-1 sm:space-y-1.5 font-['JetBrains_Mono'] text-[10px] sm:text-xs">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Sharpe</span>
                     <span style={{ color: s.sharpe > 0 ? "#22c55e" : "#ef4444" }}>{s.sharpe?.toFixed(2)}</span>
@@ -1911,7 +1970,7 @@ function OptimizerSection() {
         )}
 
         {results?.best_overall && (
-          <div className="mt-4 p-4 border border-primary/30 bg-primary/5 font-['JetBrains_Mono'] text-sm text-primary">
+          <div className="mt-3 sm:mt-4 p-3 sm:p-4 border border-primary/30 bg-primary/5 font-['JetBrains_Mono'] text-[10px] sm:text-sm text-primary">
             Meilleure stratégie: {results.best_overall.replace(/_/g, " ").toUpperCase()}
           </div>
         )}
@@ -1920,34 +1979,335 @@ function OptimizerSection() {
   );
 }
 
+function AIAnalystSection() {
+  const [aiStatus, setAiStatus] = useState<any>(null);
+  const [analysis, setAnalysis] = useState<any>(null);
+  const [riskAssessment, setRiskAssessment] = useState<any>(null);
+  const [sentiment, setSentiment] = useState<any>(null);
+  const [loading, setLoading] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getAIStatus().then(setAiStatus).catch(() => {});
+  }, []);
+
+  const handleAnalyze = async (type: string) => {
+    setLoading(type);
+    try {
+      if (type === "market") {
+        const r = await aiAnalyzeMarket();
+        setAnalysis(r);
+      } else if (type === "risk") {
+        const r = await aiAssessRisk();
+        setRiskAssessment(r);
+      } else if (type === "sentiment") {
+        const r = await aiAnalyzeSentiment();
+        setSentiment(r);
+      }
+    } catch { /* ignore */ }
+    setLoading(null);
+  };
+
+  return (
+    <section className="relative py-16 sm:py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex flex-wrap items-end justify-between gap-3 sm:gap-4 mb-6 sm:mb-10">
+          <div>
+            <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-2 sm:mb-3">14 — AI ANALYST</div>
+            <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-4xl text-foreground">Gemini AI <span className="text-primary">Reasoning</span></h2>
+          </div>
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${aiStatus?.available ? "bg-green-400" : "bg-red-400"}`} />
+            <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground">{aiStatus?.available ? `${aiStatus.api_keys_count} KEYS` : "NO KEY"}</span>
+          </div>
+        </div>
+
+        <div className="grid sm:grid-cols-3 gap-2 sm:gap-4 mb-4 sm:mb-6">
+          <button onClick={() => void handleAnalyze("market")} disabled={loading !== null} className="border border-border p-3 sm:p-5 text-left hover:border-primary/30 transition-all disabled:opacity-50" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="flex items-center gap-2 mb-2 sm:mb-3">
+              <Brain className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary" />
+              <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">MARCHÉ</span>
+            </div>
+            <div className="font-['Inter'] text-xs sm:text-sm text-foreground">{loading === "market" ? "Analyse en cours…" : "Analyser le marché"}</div>
+          </button>
+          <button onClick={() => void handleAnalyze("risk")} disabled={loading !== null} className="border border-border p-3 sm:p-5 text-left hover:border-primary/30 transition-all disabled:opacity-50" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="flex items-center gap-2 mb-2 sm:mb-3">
+              <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary" />
+              <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">RISQUE</span>
+            </div>
+            <div className="font-['Inter'] text-xs sm:text-sm text-foreground">{loading === "risk" ? "Évaluation en cours…" : "Évaluer les risques"}</div>
+          </button>
+          <button onClick={() => void handleAnalyze("sentiment")} disabled={loading !== null} className="border border-border p-3 sm:p-5 text-left hover:border-primary/30 transition-all disabled:opacity-50" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="flex items-center gap-2 mb-2 sm:mb-3">
+              <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary" />
+              <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">SENTIMENT</span>
+            </div>
+            <div className="font-['Inter'] text-xs sm:text-sm text-foreground">{loading === "sentiment" ? "Analyse en cours…" : "Analyser le sentiment"}</div>
+          </button>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-2 sm:gap-4">
+          {/* Market Analysis Result */}
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">ANALYSE MARCHÉ</div>
+            {analysis?.error ? (
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-red-400">{analysis.error}</div>
+            ) : analysis?.regime ? (
+              <div className="space-y-2 sm:space-y-3">
+                <div className="flex justify-between"><span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Régime</span><span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-foreground">{analysis.regime}</span></div>
+                <div className="flex justify-between"><span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Risque</span><span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs" style={{ color: (analysis.risk_score ?? 5) > 6 ? "#ef4444" : "#22c55e" }}>{analysis.risk_score}/10</span></div>
+                <div className="flex justify-between"><span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Confiance</span><span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">{((analysis.confidence ?? 0) * 100).toFixed(0)}%</span></div>
+                {analysis.strategy && <div className="font-['Inter'] text-[10px] sm:text-xs text-foreground mt-2">{analysis.strategy}</div>}
+                {analysis.reasoning && <div className="font-['Inter'] text-[9px] sm:text-[10px] text-muted-foreground/70 mt-1 leading-relaxed">{analysis.reasoning}</div>}
+              </div>
+            ) : (
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 sm:py-6 text-center">Cliquer "MARCHÉ" pour lancer</div>
+            )}
+          </div>
+
+          {/* Risk Assessment Result */}
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">ÉVALUATION RISQUE</div>
+            {riskAssessment?.error ? (
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-red-400">{riskAssessment.error}</div>
+            ) : riskAssessment?.overall_risk ? (
+              <div className="space-y-2 sm:space-y-3">
+                <div className="flex justify-between"><span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Score</span><span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs" style={{ color: riskAssessment.overall_risk > 6 ? "#ef4444" : "#22c55e" }}>{riskAssessment.overall_risk}/10</span></div>
+                <div className="flex justify-between"><span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Position max</span><span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">{riskAssessment.max_position_pct ?? "—"}%</span></div>
+                {riskAssessment.recommendation && <div className="font-['Inter'] text-[10px] sm:text-xs text-foreground mt-2">{riskAssessment.recommendation}</div>}
+                {riskAssessment.hedging_suggestion && <div className="font-['Inter'] text-[9px] sm:text-[10px] text-muted-foreground/70 mt-1">{riskAssessment.hedging_suggestion}</div>}
+              </div>
+            ) : (
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 sm:py-6 text-center">Cliquer "RISQUE" pour lancer</div>
+            )}
+          </div>
+
+          {/* Sentiment Result */}
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">SENTIMENT</div>
+            {sentiment?.error ? (
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-red-400">{sentiment.error}</div>
+            ) : sentiment?.overall_sentiment ? (
+              <div className="space-y-2 sm:space-y-3">
+                <div className="flex justify-between"><span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Global</span><span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">{sentiment.overall_sentiment}</span></div>
+                <div className="flex justify-between"><span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Confiance</span><span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">{((sentiment.confidence ?? 0) * 100).toFixed(0)}%</span></div>
+                {sentiment.fear_greed_interpretation && <div className="font-['Inter'] text-[10px] sm:text-xs text-foreground mt-2">{sentiment.fear_greed_interpretation}</div>}
+                {sentiment.volume_analysis && <div className="font-['Inter'] text-[9px] sm:text-[10px] text-muted-foreground/70 mt-1">{sentiment.volume_analysis}</div>}
+              </div>
+            ) : (
+              <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 sm:py-6 text-center">Cliquer "SENTIMENT" pour lancer</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FreeApisSection() {
+  const [global, setGlobal] = useState<any>(null);
+  const [trending, setTrending] = useState<any[]>([]);
+  const [gainers, setGainers] = useState<any[]>([]);
+  const [losers, setLosers] = useState<any[]>([]);
+  const [defillama, setDefillama] = useState<any>(null);
+  const [yields, setYields] = useState<any[]>([]);
+  const [funding, setFunding] = useState<any[]>([]);
+  const [liquidations, setLiquidations] = useState<any[]>([]);
+  const [mempool, setMempool] = useState<any>(null);
+  const [polymarket, setPolymarket] = useState<any[]>([]);
+
+  useEffect(() => {
+    void getCoingeckoGlobal().then(setGlobal).catch(() => {});
+    void getCoingeckoTrending().then(setTrending).catch(() => {});
+    void getCoingeckoGainers().then(setGainers).catch(() => {});
+    void getCoingeckoLosers().then(setLosers).catch(() => {});
+    void getDefillamaTVL().then(setDefillama).catch(() => {});
+    void getDefillamaYields().then(setYields).catch(() => {});
+    void getPerpFinderFunding().then(setFunding).catch(() => {});
+    void getPerpFinderLiquidations().then(setLiquidations).catch(() => {});
+    void getMempoolFees().then(setMempool).catch(() => {});
+    void getPolymarketCrypto().then(setPolymarket).catch(() => {});
+  }, []);
+
+  return (
+    <section className="relative py-16 sm:py-24 border-y border-border" style={{ background: "rgba(4,8,15,0.7)" }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="mb-6 sm:mb-10">
+          <div className="font-['JetBrains_Mono'] text-xs text-primary tracking-widest mb-2 sm:mb-3">15 — FREE APIs</div>
+          <h2 className="font-['Rajdhani'] font-700 text-3xl sm:text-4xl text-foreground">Données <span className="text-primary">En Temps Réel</span></h2>
+        </div>
+
+        {/* Row 1: CoinGecko Global + Trending */}
+        <div className="grid sm:grid-cols-2 gap-2 sm:gap-4 mb-2 sm:mb-4">
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">COINGECKO GLOBAL</div>
+            {global?.total_market_cap_usd ? (
+              <div className="grid grid-cols-2 gap-2 sm:gap-4">
+                <div><div className="font-['Rajdhani'] text-lg sm:text-xl font-700 text-foreground">${(global.total_market_cap_usd / 1e12).toFixed(2)}T</div><div className="font-['Inter'] text-[8px] sm:text-[10px] text-muted-foreground">Market Cap</div></div>
+                <div><div className="font-['Rajdhani'] text-lg sm:text-xl font-700 text-foreground">{global.btc_dominance?.toFixed(1)}%</div><div className="font-['Inter'] text-[8px] sm:text-[10px] text-muted-foreground">BTC Dom.</div></div>
+                <div><div className="font-['Rajdhani'] text-lg sm:text-xl font-700 text-foreground">{(global.total_volume_usd / 1e9)?.toFixed(1)}B</div><div className="font-['Inter'] text-[8px] sm:text-[10px] text-muted-foreground">Volume 24h</div></div>
+                <div><div className="font-['Rajdhani'] text-lg sm:text-xl font-700" style={{ color: (global.market_cap_change_24h ?? 0) > 0 ? "#22c55e" : "#ef4444" }}>{global.market_cap_change_24h?.toFixed(2)}%</div><div className="font-['Inter'] text-[8px] sm:text-[10px] text-muted-foreground">24h Change</div></div>
+              </div>
+            ) : <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 text-center">Chargement…</div>}
+          </div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">TENDANCES</div>
+            {trending.length > 0 ? (
+              <div className="space-y-1.5 sm:space-y-2">
+                {trending.slice(0, 6).map((t, i) => (
+                  <div key={i} className="flex items-center justify-between py-0.5 sm:py-1 border-b border-border/30">
+                    <span className="font-['Inter'] text-[10px] sm:text-xs text-foreground">{t.symbol}</span>
+                    <span className="font-['JetBrains_Mono'] text-[9px] sm:text-[10px] text-muted-foreground">Rank #{t.market_cap_rank}</span>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 text-center">Chargement…</div>}
+          </div>
+        </div>
+
+        {/* Row 2: Gainers + Losers */}
+        <div className="grid sm:grid-cols-2 gap-2 sm:gap-4 mb-2 sm:mb-4">
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-green-400 mb-3 sm:mb-4">TOP GAINERS 24H</div>
+            {gainers.length > 0 ? (
+              <div className="space-y-1.5 sm:space-y-2">
+                {gainers.slice(0, 5).map((g, i) => (
+                  <div key={i} className="flex items-center justify-between py-0.5 sm:py-1 border-b border-border/30">
+                    <span className="font-['Inter'] text-[10px] sm:text-xs text-foreground">{g.symbol}</span>
+                    <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-green-400">+{g.change_24h?.toFixed(2)}%</span>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 text-center">Chargement…</div>}
+          </div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-red-400 mb-3 sm:mb-4">TOP LOSERS 24H</div>
+            {losers.length > 0 ? (
+              <div className="space-y-1.5 sm:space-y-2">
+                {losers.slice(0, 5).map((l, i) => (
+                  <div key={i} className="flex items-center justify-between py-0.5 sm:py-1 border-b border-border/30">
+                    <span className="font-['Inter'] text-[10px] sm:text-xs text-foreground">{l.symbol}</span>
+                    <span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-red-400">{l.change_24h?.toFixed(2)}%</span>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 text-center">Chargement…</div>}
+          </div>
+        </div>
+
+        {/* Row 3: DeFi TVL + Yields + PerpFinder */}
+        <div className="grid sm:grid-cols-3 gap-2 sm:gap-4 mb-2 sm:mb-4">
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">DeFi TVL</div>
+            {defillama?.total_tvl ? (
+              <div>
+                <div className="font-['Rajdhani'] text-xl sm:text-2xl font-700 text-foreground">${(defillama.total_tvl / 1e9).toFixed(2)}B</div>
+                <div className="font-['JetBrains_Mono'] text-[9px] sm:text-[10px] mt-1" style={{ color: (defillama.change_pct ?? 0) > 0 ? "#22c55e" : "#ef4444" }}>{defillama.change_pct}% (24h)</div>
+              </div>
+            ) : <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 text-center">Chargement…</div>}
+          </div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">TOP YIELDS</div>
+            {yields.length > 0 ? (
+              <div className="space-y-1.5 sm:space-y-2">
+                {yields.slice(0, 5).map((y, i) => (
+                  <div key={i} className="flex items-center justify-between py-0.5 sm:py-1 border-b border-border/30">
+                    <span className="font-['Inter'] text-[9px] sm:text-[10px] text-foreground">{y.project} · {y.symbol}</span>
+                    <span className="font-['JetBrains_Mono'] text-[9px] sm:text-[10px] text-primary">{y.apy?.toFixed(1)}%</span>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 text-center">Chargement…</div>}
+          </div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">FUNDING RATES</div>
+            {funding.length > 0 ? (
+              <div className="space-y-1.5 sm:space-y-2">
+                {funding.slice(0, 5).map((f, i) => (
+                  <div key={i} className="flex items-center justify-between py-0.5 sm:py-1 border-b border-border/30">
+                    <span className="font-['Inter'] text-[9px] sm:text-[10px] text-foreground">{f.symbol}</span>
+                    <span className="font-['JetBrains_Mono'] text-[9px] sm:text-[10px]" style={{ color: (f.rate ?? 0) > 0 ? "#22c55e" : "#ef4444" }}>{((f.rate ?? 0) * 100).toFixed(4)}%</span>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 text-center">Chargement…</div>}
+          </div>
+        </div>
+
+        {/* Row 4: Liquidations + Mempool + Polymarket */}
+        <div className="grid sm:grid-cols-3 gap-2 sm:gap-4">
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">LIQUIDATIONS 24H</div>
+            {liquidations.length > 0 ? (
+              <div className="space-y-1.5 sm:space-y-2">
+                {liquidations.slice(0, 5).map((l, i) => (
+                  <div key={i} className="flex items-center justify-between py-0.5 sm:py-1 border-b border-border/30">
+                    <span className="font-['Inter'] text-[9px] sm:text-[10px] text-foreground">{l.symbol}</span>
+                    <div className="flex gap-2">
+                      <span className="font-['JetBrains_Mono'] text-[8px] sm:text-[9px] text-green-400">L:{l.longs?.toLocaleString()}</span>
+                      <span className="font-['JetBrains_Mono'] text-[8px] sm:text-[9px] text-red-400">S:{l.shorts?.toLocaleString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 text-center">Chargement…</div>}
+          </div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">BITCOIN MEMPOOL</div>
+            {mempool?.fastest_fee ? (
+              <div className="space-y-1.5 sm:space-y-2">
+                <div className="flex justify-between"><span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">Rapide</span><span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary">{mempool.fastest_fee} sat/vB</span></div>
+                <div className="flex justify-between"><span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">30 min</span><span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-foreground">{mempool.half_hour_fee} sat/vB</span></div>
+                <div className="flex justify-between"><span className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground">1 heure</span><span className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-foreground">{mempool.hour_fee} sat/vB</span></div>
+              </div>
+            ) : <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 text-center">Chargement…</div>}
+          </div>
+          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
+            <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-primary mb-3 sm:mb-4">POLYMARKET CRYPTO</div>
+            {polymarket.length > 0 ? (
+              <div className="space-y-1.5 sm:space-y-2">
+                {polymarket.slice(0, 4).map((p, i) => (
+                  <div key={i} className="py-0.5 sm:py-1 border-b border-border/30">
+                    <div className="font-['Inter'] text-[9px] sm:text-[10px] text-foreground truncate">{p.question}</div>
+                    <div className="font-['JetBrains_Mono'] text-[8px] sm:text-[9px] text-muted-foreground">Vol: ${p.volume?.toLocaleString()}</div>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground/50 py-4 text-center">Chargement…</div>}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Footer() {
   return (
-    <footer className="relative border-t border-border py-12">
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-3">
-            <div className="relative w-7 h-7">
+    <footer className="relative border-t border-border py-8 sm:py-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-6">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="relative w-6 h-6 sm:w-7 sm:h-7">
               <div className="absolute inset-0 rounded border border-primary/60" style={{ transform: "rotate(45deg)" }} />
-              <Activity className="absolute inset-0 m-auto w-3.5 h-3.5 text-primary" />
+              <Activity className="absolute inset-0 m-auto w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary" />
             </div>
-            <span className="font-['Rajdhani'] font-700 text-base tracking-[0.12em] text-foreground">
+            <span className="font-['Rajdhani'] font-700 text-sm sm:text-base tracking-[0.12em] text-foreground">
               AEGIS <span className="text-primary">AI QUANT</span>
             </span>
           </div>
 
-          <div className="flex flex-wrap gap-6">
+          <div className="flex flex-wrap gap-4 sm:gap-6">
             {["Vision", "Architecture", "Modules", "Technologies", "Roadmap"].map((l) => (
               <a
                 key={l}
                 href={`#${l.toLowerCase()}`}
-                className="font-['Inter'] text-xs text-muted-foreground hover:text-primary transition-colors"
+                className="font-['Inter'] text-[10px] sm:text-xs text-muted-foreground hover:text-primary transition-colors"
               >
                 {l}
               </a>
             ))}
           </div>
 
-          <div className="font-['JetBrains_Mono'] text-xs text-muted-foreground/50 text-center">
+          <div className="font-['JetBrains_Mono'] text-[10px] sm:text-xs text-muted-foreground/50 text-center">
             © 2025 AEGIS AI QUANT V1 — CONFIDENTIEL
           </div>
         </div>
@@ -1974,6 +2334,8 @@ export default function App() {
       <BinanceTestnetSection />
       <MultiAssetSection />
       <OptimizerSection />
+      <AIAnalystSection />
+      <FreeApisSection />
       <Footer />
     </div>
   );

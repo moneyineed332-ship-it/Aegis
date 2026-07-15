@@ -162,3 +162,85 @@ export const getCommodityPrices = async () => {
   const response = await fetch(`${apiBaseUrl}/api/v1/assets/commodities`);
   return response.json();
 };
+
+// Phase 5: AI Analyst (Gemini)
+export const getAIStatus = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/ai/status`);
+  return response.json();
+};
+export const aiAnalyzeMarket = (symbol: string = "BTCUSDT", interval: string = "1h") =>
+  postApi(`/api/v1/ai/analyze-market?symbol=${symbol}&interval=${interval}`);
+export const aiAssessRisk = (symbol: string = "BTCUSDT", interval: string = "1h") =>
+  postApi(`/api/v1/ai/assess-risk?symbol=${symbol}&interval=${interval}`);
+export const aiReviewStrategies = () => postApi("/api/v1/ai/review-strategies");
+export const aiAnalyzeSentiment = () => postApi("/api/v1/ai/analyze-sentiment");
+
+// Phase 5: Free APIs
+export const getCoingeckoGlobal = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/coingecko/global`);
+  return response.json();
+};
+export const getCoingeckoTrending = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/coingecko/trending`);
+  return response.json();
+};
+export const getCoingeckoGainers = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/coingecko/gainers`);
+  return response.json();
+};
+export const getCoingeckoLosers = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/coingecko/losers`);
+  return response.json();
+};
+export const getDefillamaTVL = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/defillama/tvl`);
+  return response.json();
+};
+export const getDefillamaChains = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/defillama/chains`);
+  return response.json();
+};
+export const getDefillamaProtocols = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/defillama/protocols`);
+  return response.json();
+};
+export const getDefillamaYields = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/defillama/yields`);
+  return response.json();
+};
+export const getPerpFinderFunding = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/perpfinder/funding`);
+  return response.json();
+};
+export const getPerpFinderOI = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/perpfinder/open-interest`);
+  return response.json();
+};
+export const getPerpFinderLiquidations = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/perpfinder/liquidations`);
+  return response.json();
+};
+export const getMempoolFees = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/mempool/fees`);
+  return response.json();
+};
+export const getDexScreenerTrending = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/dexscreener/trending`);
+  return response.json();
+};
+export const getPolymarketCrypto = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/polymarket/crypto`);
+  return response.json();
+};
+export const getFearGreedHistorical = async (limit: number = 30) => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/fear-greed/historical?limit=${limit}`);
+  return response.json();
+};
+export const getBlockstream = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/blockstream`);
+  return response.json();
+};
+export const getFreeAllData = async () => {
+  const response = await fetch(`${apiBaseUrl}/api/v1/free/all`);
+  return response.json();
+};

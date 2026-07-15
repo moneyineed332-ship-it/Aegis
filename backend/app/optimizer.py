@@ -30,6 +30,8 @@ def optimize_sma(candles: list[dict], capital: float = 10_000) -> dict:
                 "fast": fast,
                 "slow": slow,
                 "sharpe": metrics["sharpe_ratio"],
+                "sortino": metrics.get("sortino_ratio", 0),
+                "calmar": metrics.get("calmar_ratio", 0),
                 "return": metrics["total_return"],
                 "drawdown": metrics["max_drawdown"],
                 "trades": metrics["trade_count"],
@@ -40,8 +42,10 @@ def optimize_sma(candles: list[dict], capital: float = 10_000) -> dict:
     if not results:
         return {"status": "no_valid_parameters", "best": None, "tested": 0}
 
-    # Sort by Sharpe ratio
-    results.sort(key=lambda x: x["sharpe"], reverse=True)
+    # Sort by composite score: 40% Sharpe + 35% Sortino + 25% Calmar
+    def composite(r: dict) -> float:
+        return 0.40 * r.get("sharpe", 0) + 0.35 * r.get("sortino", 0) + 0.25 * r.get("calmar", 0)
+    results.sort(key=composite, reverse=True)
     best = results[0]
 
     return {
@@ -79,6 +83,8 @@ def optimize_donchian(candles: list[dict], capital: float = 10_000) -> dict:
                 "breakout": breakout,
                 "exit": exit_p,
                 "sharpe": metrics["sharpe_ratio"],
+                "sortino": metrics.get("sortino_ratio", 0),
+                "calmar": metrics.get("calmar_ratio", 0),
                 "return": metrics["total_return"],
                 "drawdown": metrics["max_drawdown"],
                 "trades": metrics["trade_count"],
@@ -89,7 +95,7 @@ def optimize_donchian(candles: list[dict], capital: float = 10_000) -> dict:
     if not results:
         return {"status": "no_valid_parameters", "best": None, "tested": 0}
 
-    results.sort(key=lambda x: x["sharpe"], reverse=True)
+    results.sort(key=lambda x: 0.40 * x.get("sharpe", 0) + 0.35 * x.get("sortino", 0) + 0.25 * x.get("calmar", 0), reverse=True)
     best = results[0]
 
     return {
@@ -127,6 +133,8 @@ def optimize_mean_reversion(candles: list[dict], capital: float = 10_000) -> dic
                 "exit_z": exit_z,
                 "period": period,
                 "sharpe": metrics["sharpe_ratio"],
+                "sortino": metrics.get("sortino_ratio", 0),
+                "calmar": metrics.get("calmar_ratio", 0),
                 "return": metrics["total_return"],
                 "drawdown": metrics["max_drawdown"],
                 "trades": metrics["trade_count"],
@@ -137,7 +145,7 @@ def optimize_mean_reversion(candles: list[dict], capital: float = 10_000) -> dic
     if not results:
         return {"status": "no_valid_parameters", "best": None, "tested": 0}
 
-    results.sort(key=lambda x: x["sharpe"], reverse=True)
+    results.sort(key=lambda x: 0.40 * x.get("sharpe", 0) + 0.35 * x.get("sortino", 0) + 0.25 * x.get("calmar", 0), reverse=True)
     best = results[0]
 
     return {
@@ -172,6 +180,8 @@ def optimize_grid(candles: list[dict], capital: float = 10_000) -> dict:
                 "count": count,
                 "spread": spread,
                 "sharpe": metrics["sharpe_ratio"],
+                "sortino": metrics.get("sortino_ratio", 0),
+                "calmar": metrics.get("calmar_ratio", 0),
                 "return": metrics["total_return"],
                 "drawdown": metrics["max_drawdown"],
                 "trades": metrics["trade_count"],
@@ -182,7 +192,7 @@ def optimize_grid(candles: list[dict], capital: float = 10_000) -> dict:
     if not results:
         return {"status": "no_valid_parameters", "best": None, "tested": 0}
 
-    results.sort(key=lambda x: x["sharpe"], reverse=True)
+    results.sort(key=lambda x: 0.40 * x.get("sharpe", 0) + 0.35 * x.get("sortino", 0) + 0.25 * x.get("calmar", 0), reverse=True)
     best = results[0]
 
     return {
@@ -197,13 +207,15 @@ def optimize_grid(candles: list[dict], capital: float = 10_000) -> dict:
 def _generate_recommendation(best: dict, strategy_type: str) -> str:
     """Generate a human-readable recommendation from optimization results."""
     sharpe = best.get("sharpe", 0)
+    sortino = best.get("sortino", 0)
+    calmar = best.get("calmar", 0)
     ret = best.get("return", 0)
     dd = best.get("drawdown", 0)
     trades = best.get("trades", 0)
 
-    if sharpe >= 1.0 and ret > 0.05 and dd > -0.15:
+    if sharpe >= 1.0 and sortino >= 1.5 and ret > 0.05 and dd > -0.15:
         grade = "EXCELLENT"
-    elif sharpe >= 0.5 and ret > 0 and dd > -0.20:
+    elif sharpe >= 0.5 and sortino >= 0.8 and ret > 0 and dd > -0.20:
         grade = "GOOD"
     elif sharpe > 0 and ret > 0:
         grade = "ACCEPTABLE"
@@ -211,7 +223,8 @@ def _generate_recommendation(best: dict, strategy_type: str) -> str:
         grade = "WEAK"
 
     parts = [f"Strategy {strategy_type} optimization result: {grade}"]
-    parts.append(f"Best Sharpe: {sharpe:.2f}, Return: {ret*100:.1f}%, Drawdown: {dd*100:.1f}%, Trades: {trades}")
+    parts.append(f"Sharpe: {sharpe:.2f}, Sortino: {sortino:.2f}, Calmar: {calmar:.2f}")
+    parts.append(f"Return: {ret*100:.1f}%, Drawdown: {dd*100:.1f}%, Trades: {trades}")
 
     if grade in ("EXCELLENT", "GOOD"):
         parts.append("Recommendation: Promote to paper trading candidate pool.")
@@ -231,6 +244,8 @@ def compare_strategies(results: dict[str, dict]) -> dict:
             strategies.append({
                 "strategy": name,
                 "sharpe": result["best"].get("sharpe", 0),
+                "sortino": result["best"].get("sortino", 0),
+                "calmar": result["best"].get("calmar", 0),
                 "return": result["best"].get("return", 0),
                 "drawdown": result["best"].get("drawdown", 0),
                 "trades": result["best"].get("trades", 0),
@@ -239,7 +254,7 @@ def compare_strategies(results: dict[str, dict]) -> dict:
     if not strategies:
         return {"ranking": [], "best_overall": None}
 
-    strategies.sort(key=lambda x: x["sharpe"], reverse=True)
+    strategies.sort(key=lambda x: 0.40 * x["sharpe"] + 0.35 * x["sortino"] + 0.25 * x["calmar"], reverse=True)
     return {
         "ranking": strategies,
         "best_overall": strategies[0]["strategy"] if strategies else None,

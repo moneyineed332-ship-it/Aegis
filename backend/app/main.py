@@ -3,11 +3,11 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import advisor, backtesting, backtesting_advanced, binance_testnet, coach, data_quality, deployment, execution, features, grid, journal, lab, market_data, mean_reversion, memory, ml_regime, multi_asset, optimizer, regime, risk, settings, storage, strategy_registry, supervisor
+from . import advisor, ai_analyst, backtesting, backtesting_advanced, binance_testnet, coach, data_quality, deployment, execution, features, free_apis, grid, journal, lab, market_data, mean_reversion, memory, ml_regime, multi_asset, optimizer, regime, risk, settings, storage, strategy_registry, supervisor
 
 app = FastAPI(title="AEGIS AI Quant MVP", version="0.1.0")
 app.add_middleware(
@@ -1077,3 +1077,156 @@ def get_commodity_prices() -> list[dict]:
 @app.get("/api/v1/assets/stock/{symbol}")
 def get_stock_price(symbol: str) -> dict:
     return multi_asset.fetch_stock_price(symbol)
+
+
+# === AI Analyst (Gemini) ===
+
+@app.get("/api/v1/ai/status")
+def ai_status() -> dict:
+    return ai_analyst.get_status()
+
+
+@app.post("/api/v1/ai/analyze-market", status_code=201)
+def ai_analyze_market(symbol: str = "BTCUSDT", interval: str = "1h") -> dict:
+    candles = storage.list_ohlcv_candles(symbol, interval, limit=100)
+    if not candles:
+        raise HTTPException(422, {"message": "No candle data available. Refresh market data first."})
+    feats = features.latest_features(candles)
+    risk_data = risk.historical_risk(candles, INITIAL_CAPITAL)
+    regime_data = regime.classify(feats)
+    return ai_analyst.analyze_market(candles, feats, risk_data, regime_data)
+
+
+@app.post("/api/v1/ai/assess-risk", status_code=201)
+def ai_assess_risk(symbol: str = "BTCUSDT", interval: str = "1h") -> dict:
+    candles = storage.list_ohlcv_candles(symbol, interval, limit=100)
+    if not candles:
+        raise HTTPException(422, {"message": "No candle data available."})
+    risk_data = risk.historical_risk(candles, INITIAL_CAPITAL)
+    positions = storage.list_positions()
+    return ai_analyst.assess_risk(candles, risk_data, positions)
+
+
+@app.post("/api/v1/ai/review-strategies", status_code=201)
+def ai_review_strategies() -> dict:
+    backtests = storage.list_recent_backtests(limit=10)
+    candles = storage.list_ohlcv_candles("BTCUSDT", "1h", limit=2000)
+    opt_results = {}
+    if candles:
+        try:
+            sma = optimizer.optimize_sma(candles, INITIAL_CAPITAL)
+            donchian = optimizer.optimize_donchian(candles, INITIAL_CAPITAL)
+            mr = optimizer.optimize_mean_reversion(candles, INITIAL_CAPITAL)
+            grid = optimizer.optimize_grid(candles, INITIAL_CAPITAL)
+            opt_results = optimizer.compare_strategies({
+                "sma_crossover": sma,
+                "donchian_breakout": donchian,
+                "mean_reversion": mr,
+                "grid_adaptive": grid,
+            })
+        except Exception:
+            opt_results = {"error": "Optimization failed"}
+    return ai_analyst.review_strategies(backtests, opt_results)
+
+
+@app.post("/api/v1/ai/analyze-sentiment", status_code=201)
+def ai_analyze_sentiment() -> dict:
+    market = {}
+    try:
+        market = market_data.fetch_spot_prices()
+    except Exception:
+        pass
+    fg = storage.list_fear_greed()
+    fr = {}
+    try:
+        fr = market_data.fetch_funding_rates("BTCUSDT")
+    except Exception:
+        pass
+    return ai_analyst.analyze_sentiment(market, fg, fr)
+
+
+# === Free APIs (CoinGecko, DeFiLlama, PerpFinder, etc.) ===
+
+@app.get("/api/v1/free/coingecko/global")
+def free_coingecko_global() -> dict:
+    return free_apis.coingecko_global()
+
+
+@app.get("/api/v1/free/coingecko/trending")
+def free_coingecko_trending() -> list[dict]:
+    return free_apis.coingecko_trending()
+
+
+@app.get("/api/v1/free/coingecko/gainers")
+def free_coingecko_gainers() -> list[dict]:
+    return free_apis.coingecko_top_gainers()
+
+
+@app.get("/api/v1/free/coingecko/losers")
+def free_coingecko_losers() -> list[dict]:
+    return free_apis.coingecko_top_losers()
+
+
+@app.get("/api/v1/free/defillama/tvl")
+def free_defillama_tvl() -> dict:
+    return free_apis.defillama_tvl()
+
+
+@app.get("/api/v1/free/defillama/chains")
+def free_defillama_chains() -> list[dict]:
+    return free_apis.defillama_chains()
+
+
+@app.get("/api/v1/free/defillama/protocols")
+def free_defillama_protocols() -> list[dict]:
+    return free_apis.defillama_top_protocols()
+
+
+@app.get("/api/v1/free/defillama/yields")
+def free_defillama_yields() -> list[dict]:
+    return free_apis.defillama_yields()
+
+
+@app.get("/api/v1/free/perpfinder/funding")
+def free_perpfinder_funding() -> list[dict]:
+    return free_apis.perpfinder_funding_rates()
+
+
+@app.get("/api/v1/free/perpfinder/open-interest")
+def free_perpfinder_oi() -> list[dict]:
+    return free_apis.perpfinder_open_interest()
+
+
+@app.get("/api/v1/free/perpfinder/liquidations")
+def free_perpfinder_liquidations() -> list[dict]:
+    return free_apis.perpfinder_liquidations()
+
+
+@app.get("/api/v1/free/mempool/fees")
+def free_mempool_fees() -> dict:
+    return free_apis.mempool_fees()
+
+
+@app.get("/api/v1/free/dexscreener/trending")
+def free_dexscreener_trending() -> list[dict]:
+    return free_apis.dexscreener_trending()
+
+
+@app.get("/api/v1/free/polymarket/crypto")
+def free_polymarket_crypto() -> list[dict]:
+    return free_apis.polymarket_crypto_markets()
+
+
+@app.get("/api/v1/free/fear-greed/historical")
+def free_fear_greed_historical(limit: int = 30) -> list[dict]:
+    return free_apis.fear_greed_historical(limit)
+
+
+@app.get("/api/v1/free/blockstream")
+def free_blockstream() -> dict:
+    return free_apis.blockstream_info()
+
+
+@app.get("/api/v1/free/all")
+def free_all_data() -> dict:
+    return free_apis.get_all_free_data()

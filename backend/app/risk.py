@@ -4,7 +4,10 @@ import math
 from statistics import fmean, stdev
 
 
-def historical_risk(candles: list[dict], capital: float, confidence: float = 0.95) -> dict:
+_PERIODS_PER_YEAR = {"5m": 105_120, "15m": 35_040, "1h": 8_760, "4h": 2_190, "1d": 365}
+
+
+def historical_risk(candles: list[dict], capital: float, confidence: float = 0.95, interval: str = "1h") -> dict:
     """Core VaR/CVaR calculation."""
     closes = [candle["close"] for candle in candles]
     if len(closes) < 30:
@@ -15,10 +18,10 @@ def historical_risk(candles: list[dict], capital: float, confidence: float = 0.9
     var_return = -tail[-1]
     cvar_return = -sum(tail) / len(tail)
 
-    # Additional metrics
     max_drawdown = _max_drawdown(closes)
     volatility = stdev(returns) if len(returns) > 1 else 0
-    annualized_vol = volatility * math.sqrt(8760)  # hourly candles
+    ppy = _PERIODS_PER_YEAR.get(interval, 8_760)
+    annualized_vol = volatility * math.sqrt(ppy)
 
     return {
         "confidence": confidence,
@@ -29,6 +32,7 @@ def historical_risk(candles: list[dict], capital: float, confidence: float = 0.9
         "max_drawdown_pct": round(max_drawdown * 100, 2),
         "volatility": round(volatility, 6),
         "annualized_volatility": round(annualized_vol, 4),
+        "interval": interval,
     }
 
 

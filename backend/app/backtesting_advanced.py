@@ -141,47 +141,57 @@ def monte_carlo_simulation(
         return {"status": "backtest_failed", "error": "Base backtest failed"}
 
     total_return = base_metrics.get("total_return", 0)
-    max_dd = base_metrics.get("max_drawdown", 0)
     trade_count = base_metrics.get("trade_count", 0)
     win_rate = base_metrics.get("win_rate", 0.5)
     sharpe = base_metrics.get("sharpe_ratio", 0)
+    avg_trade_return = base_metrics.get("avg_trade_return", total_return / max(trade_count, 1))
 
     if trade_count == 0:
         return {"status": "no_trades", "base_metrics": base_metrics}
 
-    avg_trade_return = total_return / max(trade_count, 1)
-    trade_std = abs(avg_trade_return) * 0.5
+    # Build actual trade return distribution from backtest
+    # Use the avg_trade_return and win_rate to model realistic trades
+    win_return = abs(avg_trade_return) * 1.2 if avg_trade_return > 0 else 0.005
+    loss_return = -abs(avg_trade_return) * 0.8 if avg_trade_return > 0 else -0.008
 
     simulated_returns = []
     simulated_drawdowns = []
     simulated_sharpes = []
     simulated_finals = []
+    simulated_win_rates = []
+    simulated_max_dds = []
 
     for _ in range(n_simulations):
         returns = []
         equity = 1.0
         peak = 1.0
         max_sim_dd = 0
+        wins = 0
 
         for _ in range(trade_count):
             if random.random() < win_rate:
-                trade_ret = abs(random.gauss(avg_trade_return, trade_std))
+                # Winning trade: sample from log-normal-ish distribution
+                trade_ret = abs(random.gauss(win_return, win_return * 0.3))
+                wins += 1
             else:
-                trade_ret = -abs(random.gauss(avg_trade_return * 0.8, trade_std))
+                # Losing trade: capped loss (realistic)
+                trade_ret = max(-0.15, random.gauss(loss_return, abs(loss_return) * 0.4))
             returns.append(trade_ret)
             equity *= (1 + trade_ret)
             peak = max(peak, equity)
             dd = equity / peak - 1
             max_sim_dd = min(max_sim_dd, dd)
 
+        sim_sharpe = 0.0
+        if len(returns) > 1 and stdev(returns) > 0:
+            sim_sharpe = fmean(returns) / stdev(returns) * math.sqrt(8760)
+
         simulated_returns.append(equity - 1)
         simulated_drawdowns.append(max_sim_dd)
         simulated_finals.append(equity)
-
-        if len(returns) > 1 and stdev(returns) > 0:
-            simulated_sharpes.append(fmean(returns) / stdev(returns) * math.sqrt(8760))
-        else:
-            simulated_sharpes.append(0)
+        simulated_sharpes.append(sim_sharpe)
+        simulated_win_rates.append(wins / trade_count)
+        simulated_max_dds.append(max_sim_dd)
 
     simulated_returns.sort()
     simulated_drawdowns.sort()
@@ -252,5 +262,5 @@ def sensitivity_analysis(
         "results": results,
         "best_sharpe": {"value": valid[sharpes.index(max(sharpes))]["value"], "sharpe": max(sharpes)},
         "best_return": {"value": valid[returns.index(max(returns))]["value"], "return": max(returns)},
-        "stability": "stable" if stdev(sharpes) < 0.5 else "volatile",
+        "stability": "stable" if len(sharpes) < 2 or stdev(sharpes) < 0.5 else "volatile",
     }
