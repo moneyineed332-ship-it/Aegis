@@ -5,7 +5,8 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.features import latest_features, _rsi, _macd, _atr, _bollinger, _ema
+from app.features import latest_features
+from app.indicators import rsi_single as _rsi, ema_single as _ema, atr_single as _atr, bollinger_dict as _bollinger, macd_dict as _macd
 
 
 def _make_candles(n: int = 100, base_price: float = 100.0) -> list[dict]:
@@ -32,11 +33,23 @@ def test_latest_features_keys():
     candles = _make_candles(100)
     result = latest_features(candles)
     expected_keys = {
-        "close", "sma_20", "sma_50", "momentum_20", "volatility_20", "range_20",
+        "close", "sma_20", "sma_50", "sma_ratio", "momentum_20", "volatility_20",
+        "volatility_annualized", "range_20",
         "rsi_14", "macd", "macd_signal", "macd_histogram",
-        "atr_14", "bollinger_upper", "bollinger_middle", "bollinger_lower",
+        "atr_14", "bollinger_upper", "bollinger_middle", "bollinger_lower", "bollinger_width",
+        "adx", "plus_di", "minus_di",
+        "stoch_rsi_k", "stoch_rsi_d",
+        "vwap", "williams_r", "obv", "zscore_20",
+        "trend_strength", "downside_volatility",
+        "smc_trend", "smc_score", "smc_direction",
+        "has_bullish_ob", "has_bearish_ob",
+        "bullish_fvg_count", "bearish_fvg_count",
+        "bsl_count", "ssl_count",
+        "recent_bull_sweep", "recent_bear_sweep",
+        "pd_zone", "pd_position",
+        "msc_signal", "msc_score",
     }
-    assert expected_keys == set(result.keys()), f"Missing keys: {expected_keys - set(result.keys())}"
+    assert expected_keys == set(result.keys()), f"Missing keys: {expected_keys - set(result.keys())}, Extra: {set(result.keys()) - expected_keys}"
 
 
 def test_latest_features_not_enough_candles():

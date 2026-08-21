@@ -3,10 +3,21 @@
 Enhanced with ADX, Stochastic RSI, VWAP, and hysteresis.
 """
 
+import threading
+
+def reset_hysteresis():
+    """Reset hysteresis state for testing."""
+    global _prev_regime, _prev_confidence
+    with _regime_lock:
+        _prev_regime = None
+        _prev_confidence = 0.0
+
+
 PROBABILITY_FLOOR = 0.05
 
 _prev_regime: str | None = None
 _prev_confidence: float = 0.0
+_regime_lock = threading.Lock()
 
 REGIME_LABELS = {
     "bull_trend": "Tendance Haussière",
@@ -87,13 +98,14 @@ def classify(features: dict, hysteresis: float = 0.15) -> dict:
         confidence = min(0.7, 0.4 + (1 - abs(trend_strength) * 8) * 0.3)
 
     # --- Hysteresis: prevent flip-flopping at boundaries ---
-    if _prev_regime and _prev_regime != regime:
-        if _prev_confidence > confidence + hysteresis:
-            regime = _prev_regime
-            confidence = _prev_confidence
+    with _regime_lock:
+        if _prev_regime and _prev_regime != regime:
+            if _prev_confidence > confidence + hysteresis:
+                regime = _prev_regime
+                confidence = _prev_confidence
 
-    _prev_regime = regime
-    _prev_confidence = confidence
+        _prev_regime = regime
+        _prev_confidence = confidence
 
     confidence = round(confidence, 4)
 
@@ -104,9 +116,14 @@ def classify(features: dict, hysteresis: float = 0.15) -> dict:
     total = sum(probabilities.values())
     probabilities = {k: round(v / total, 4) for k, v in probabilities.items()}
 
+    # Choppy filter (Phase 1): weak trend + low ADX + flat range → avoid false
+    # Donchian breakouts. Used by the advisor as an entry gate.
+    is_choppy = bool(adx < 20 and regime == "range")
+
     return {
         "regime": regime,
         "confidence": confidence,
+        "is_choppy": is_choppy,
         "probabilities": probabilities,
         "label": REGIME_LABELS.get(regime, regime),
         "indicators": {

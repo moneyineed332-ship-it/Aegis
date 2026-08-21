@@ -7,29 +7,44 @@ from statistics import fmean
 def track_outcome(decision: dict, current_price: float, entry_price: float | None = None) -> dict:
     """Track the outcome of a past decision by comparing with current market state.
 
-    Each decision should have: {analysis, risk, recommendation, created_at}.
+    Supports two formats:
+    - Nested: {"recommendation": {"action": ..., "strategy": ...}, "risk": {"entry_price": ...}}
+    - Flat:   {"action": "buy", "strategy": ..., "price": 64000}  (from engine)
     """
-    recommendation = decision.get("recommendation", {})
-    action = recommendation.get("action", "unknown")
-    strategy = recommendation.get("strategy")
+    dec_data = decision.get("decision", decision)
 
-    # Calculate performance since decision
+    # Flat format (engine saves action/strategy/price at top level)
+    action = dec_data.get("action") or dec_data.get("recommendation", {}).get("action", "unknown")
+    strategy = dec_data.get("strategy") or dec_data.get("recommendation", {}).get("strategy")
+    regime = dec_data.get("regime")
+    confidence = dec_data.get("confidence")
+    reason = dec_data.get("reason")
+    order_id = dec_data.get("order_id")
+
+    if entry_price is None:
+        entry_price = dec_data.get("price") or dec_data.get("entry_price") or dec_data.get("risk", {}).get("entry_price")
+
     decision_time = decision.get("created_at", "")
     pnl = None
-    hit_rate = None
 
     if entry_price and current_price and entry_price > 0:
-        if action == "research" and strategy:
-            # Assume a long entry was taken
+        if action in ("buy", "long") and strategy:
+            pnl = (current_price - entry_price) / entry_price
+        elif action in ("sell", "short") and strategy:
+            pnl = (entry_price - current_price) / entry_price
+        elif action == "research" and strategy:
             pnl = (current_price - entry_price) / entry_price
         elif action == "wait":
-            # No position taken — compare with what would have happened
-            pnl = 0  # No gain, no loss
+            pnl = 0
 
     return {
         "decision_id": decision.get("id"),
         "action": action,
         "strategy": strategy,
+        "regime": regime,
+        "confidence": confidence,
+        "reason": reason,
+        "order_id": order_id,
         "decision_time": decision_time,
         "entry_price": entry_price,
         "current_price": current_price,
@@ -48,7 +63,13 @@ def _classify_outcome(pnl: float | None, action: str) -> str:
         elif pnl > 0.02:
             return "missed_opportunity"  # Price rose, should have entered
         return "neutral_wait"
-    if action == "research":
+    if action in ("buy", "long", "research"):
+        if pnl > 0:
+            return "correct_entry"
+        elif pnl < 0:
+            return "wrong_entry"
+        return "neutral_entry"
+    if action in ("sell", "short"):
         if pnl > 0:
             return "correct_entry"
         elif pnl < 0:
@@ -72,8 +93,11 @@ def analyze_decisions(decisions: list[dict], current_prices: dict[str, float]) -
     outcomes = []
     for dec in decisions:
         symbol = dec.get("symbol", "BTCUSDT")
+        dec_data = dec.get("decision", dec)
+        if dec_data.get("symbol"):
+            symbol = dec_data["symbol"]
         current_price = current_prices.get(symbol, 0)
-        entry_price = dec.get("decision", {}).get("risk", {}).get("entry_price")
+        entry_price = dec_data.get("price") or dec_data.get("entry_price") or dec_data.get("risk", {}).get("entry_price")
         tracked = track_outcome(dec, current_price, entry_price)
         outcomes.append({**tracked, "symbol": symbol})
 
@@ -145,13 +169,17 @@ def feedback_summary(analyses: list[dict]) -> dict:
     by_action = analyses.get("by_action", {})
 
     if by_action.get("wait", {}).get("accuracy", 0) >= 0.7:
-        strengths.append("Good at identifying when to stay out")
+        strengths.append("Bon jugement sur les périodes d'inactivité")
     if by_action.get("research", {}).get("accuracy", 0) >= 0.7:
-        strengths.append("Strong strategy selection when entering")
+        strengths.append("Bonne sélection de stratégie")
+    if any(by_action.get(a, {}).get("accuracy", 0) >= 0.7 for a in ("buy", "long", "sell", "short")):
+        strengths.append("Exécution de trades solide")
     if by_action.get("wait", {}).get("accuracy", 0) < 0.5:
-        weaknesses.append("Missing too many opportunities when waiting")
+        weaknesses.append("Manque d'opportunités en restant trop passif")
     if by_action.get("research", {}).get("accuracy", 0) < 0.5:
-        weaknesses.append("Entering positions at wrong times")
+        weaknesses.append("Entrées de position au mauvais moment")
+    if any(by_action.get(a, {}).get("accuracy", 0) < 0.5 for a in ("buy", "sell", "long", "short")):
+        weaknesses.append("Taux de réussite des trades trop faible")
 
     if avg_pnl is not None and avg_pnl > 0:
         strengths.append(f"Positive average PnL ({avg_pnl*100:.2f}%)")

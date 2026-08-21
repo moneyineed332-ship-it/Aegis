@@ -5,6 +5,8 @@ Pipeline: idea → simulation → backtest → walk_forward → paper_trading �
 
 from datetime import datetime, timezone
 
+from . import storage as _storage
+
 PIPELINE_STAGES = [
     "idea",
     "simulation",
@@ -27,7 +29,7 @@ STAGE_THRESHOLDS = {
 
 def create_pipeline(strategy_id: str, symbol: str, parameters: dict) -> dict:
     """Create a new deployment pipeline for a strategy."""
-    return {
+    pipeline = {
         "strategy_id": strategy_id,
         "symbol": symbol,
         "parameters": parameters,
@@ -36,6 +38,8 @@ def create_pipeline(strategy_id: str, symbol: str, parameters: dict) -> dict:
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    _persist_pipeline(pipeline)
+    return pipeline
 
 
 def advance_stage(pipeline: dict, stage: str, result: dict) -> dict:
@@ -62,12 +66,14 @@ def advance_stage(pipeline: dict, stage: str, result: dict) -> dict:
     else:
         current_stage = "failed"
 
-    return {
+    pipeline_out = {
         **pipeline,
         "current_stage": current_stage,
         "stages": stages,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    _persist_pipeline(pipeline_out)
+    return pipeline_out
 
 
 def validate_backtest(metrics: dict, stage: str = "backtest") -> dict:
@@ -109,13 +115,15 @@ def rollback(pipeline: dict, reason: str) -> dict:
         stages = pipeline["stages"].copy()
         stages[pipeline["current_stage"]] = {**stages[pipeline["current_stage"]], "status": "rolled_back"}
         stages[prev_stage] = {**stages[prev_stage], "status": "in_progress"}
-        return {
+        pipeline_out = {
             **pipeline,
             "current_stage": prev_stage,
             "stages": stages,
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "rollback_reason": reason,
         }
+        _persist_pipeline(pipeline_out)
+        return pipeline_out
     return pipeline
 
 
@@ -128,3 +136,18 @@ def get_pipeline_status(pipeline: dict) -> dict:
         failed_stages = [s for s, v in pipeline["stages"].items() if v["status"] == "failed"]
         return {"status": "blocked", "message": f"Failed at stage(s): {', '.join(failed_stages)}"}
     return {"status": "in_progress", "current_stage": stage, "message": f"Currently at stage: {stage}"}
+
+
+# --- Persistence helpers ---
+
+def _persist_pipeline(pipeline: dict) -> None:
+    """Save pipeline to DB (best-effort)."""
+    try:
+        _storage.save_pipeline(pipeline)
+    except Exception:
+        pass
+
+
+def restore_pipelines() -> list[dict]:
+    """Restore all pipelines from DB on engine startup."""
+    return _storage.list_pipelines()

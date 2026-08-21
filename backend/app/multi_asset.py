@@ -1,9 +1,28 @@
 """Multi-asset support: Forex, Commodities, Stocks via public APIs."""
 
-import json
+import logging
 from datetime import datetime, timezone
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+
+import httpx
+
+from . import config
+
+logger = logging.getLogger(__name__)
+
+# Shared httpx client for connection pooling
+_http_client: httpx.Client | None = None
+
+
+def _get_http_client() -> httpx.Client:
+    """Get or create a shared httpx client."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.Client(
+            timeout=config.HTTP_TIMEOUT,
+            headers={"User-Agent": "AEGIS-AI-Quant/0.1 multi-asset"},
+            follow_redirects=True,
+        )
+    return _http_client
 
 
 # === Supported Asset Classes ===
@@ -33,18 +52,17 @@ ASSET_CLASSES = {
 
 
 def _get(url: str, params: dict | None = None) -> dict | list:
-    query = urlencode(params) if params else ""
-    full_url = f"{url}?{query}" if query else url
-    request = Request(full_url, headers={"User-Agent": "AEGIS-AI-Quant/0.1 multi-asset"})
-    with urlopen(request, timeout=15) as response:
-        return json.loads(response.read().decode("utf-8"))
+    client = _get_http_client()
+    response = client.get(url, params=params)
+    response.raise_for_status()
+    return response.json()
 
 
 # === Forex ===
 
 def fetch_forex_rates(base: str = "USD") -> dict:
     """Fetch forex rates from exchangerate-api (free tier)."""
-    url = f"https://open.er-api.com/v6/latest/{base}"
+    url = f"{config.FOREX_API_URL}/{base}"
     try:
         data = _get(url)
         if data.get("result") == "success":
@@ -54,14 +72,14 @@ def fetch_forex_rates(base: str = "USD") -> dict:
                 "source": "open_er_api",
                 "collected_at": datetime.now(timezone.utc).isoformat(),
             }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Forex rate fetch failed: %s", e, exc_info=True)
     return {"base": base, "rates": {}, "source": "open_er_api", "error": "fetch_failed"}
 
 
 def fetch_forex_ohlcv(pair: str, interval: str = "1h", limit: int = 100) -> list[dict]:
     """Fetch forex OHLCV from Twelve Data (free tier limited)."""
-    url = f"https://api.twelvedata.com/time_series"
+    url = f"{config.TWELVEDATA_URL}/time_series"
     try:
         data = _get(url, {"symbol": pair, "interval": interval, "outputsize": limit})
         values = data.get("values", [])
@@ -80,7 +98,8 @@ def fetch_forex_ohlcv(pair: str, interval: str = "1h", limit: int = 100) -> list
             }
             for v in values
         ]
-    except Exception:
+    except Exception as e:
+        logger.debug("Forex OHLCV fetch failed: %s", e, exc_info=True)
         return []
 
 
@@ -102,7 +121,7 @@ def fetch_commodity_prices() -> list[dict]:
 
     for name, yahoo_sym in yahoo_symbols.items():
         try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_sym}"
+            url = f"{config.YAHOO_FINANCE_URL}/{yahoo_sym}"
             data = _get(url, {"interval": "1d", "range": "1d"})
             meta = data.get("chart", {}).get("result", [{}])[0].get("meta", {})
             price = meta.get("regularMarketPrice", 0)
@@ -114,7 +133,8 @@ def fetch_commodity_prices() -> list[dict]:
                     "source": "yahoo_finance",
                     "collected_at": collected_at,
                 })
-        except Exception:
+        except Exception as e:
+            logger.debug("Commodity price fetch failed for %s: %s", name, e, exc_info=True)
             continue
 
     return prices
@@ -128,7 +148,7 @@ def fetch_commodity_ohlcv(symbol: str, interval: str = "1d", limit: int = 100) -
     }
     yahoo_sym = yahoo_map.get(symbol, symbol)
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_sym}"
+        url = f"{config.YAHOO_FINANCE_URL}/{yahoo_sym}"
         data = _get(url, {"interval": interval, "range": f"{limit}d"})
         result = data.get("chart", {}).get("result", [{}])[0]
         timestamps = result.get("timestamp", [])
@@ -150,17 +170,57 @@ def fetch_commodity_ohlcv(symbol: str, interval: str = "1d", limit: int = 100) -
                     "source": "yahoo_finance",
                 })
         return candles[-limit:]
-    except Exception:
+    except Exception as e:
+        logger.debug("Commodity OHLCV fetch failed for %s: %s", symbol, e, exc_info=True)
         return []
 
 
 # === Stocks ===
 
-def fetch_stock_price(symbol: str) -> dict:
-    """Fetch stock price from Yahoo Finance."""
-    collected_at = datetime.now(timezone.utc).isoformat()
+def _finnhub_get(endpoint: str, params: dict | None = None) -> dict | list | None:
+    """Internal helper for Finnhub API requests."""
+    if not config.FINNHUB_API_KEY:
+        return None
+    params = params or {}
+    params["token"] = config.FINNHUB_API_KEY
+    url = f"{config.FINNHUB_URL}{endpoint}"
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        client = _get_http_client()
+        response = client.get(url, params=params)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.debug("Finnhub request failed: %s", e, exc_info=True)
+        return None
+
+
+def fetch_stock_price(symbol: str) -> dict:
+    """Fetch stock price — Finnhub primary, Yahoo fallback."""
+    collected_at = datetime.now(timezone.utc).isoformat()
+
+    # Try Finnhub first
+    if config.FINNHUB_API_KEY:
+        data = _finnhub_get("/quote", {"symbol": symbol})
+        if data and data.get("c") is not None and data["c"] != 0:
+            return {
+                "symbol": symbol,
+                "price": float(data["c"]),
+                "bid": float(data.get("b", 0)),
+                "ask": float(data.get("dp", 0)),
+                "open": float(data.get("o", 0)),
+                "high": float(data.get("h", 0)),
+                "low": float(data.get("l", 0)),
+                "previous_close": float(data.get("pc", 0)),
+                "change": float(data.get("d", 0)),
+                "change_percent": float(data.get("dp", 0)),
+                "currency": "USD",
+                "source": "finnhub",
+                "collected_at": collected_at,
+            }
+
+    # Fallback to Yahoo Finance
+    try:
+        url = f"{config.YAHOO_FINANCE_URL}/{symbol}"
         data = _get(url, {"interval": "1d", "range": "1d"})
         meta = data.get("chart", {}).get("result", [{}])[0].get("meta", {})
         return {
@@ -170,14 +230,48 @@ def fetch_stock_price(symbol: str) -> dict:
             "source": "yahoo_finance",
             "collected_at": collected_at,
         }
-    except Exception:
+    except Exception as e:
+        logger.debug("Stock price fetch failed for %s: %s", symbol, e, exc_info=True)
         return {"symbol": symbol, "price": 0, "error": "fetch_failed"}
 
 
 def fetch_stock_ohlcv(symbol: str, interval: str = "1d", limit: int = 100) -> list[dict]:
-    """Fetch stock OHLCV from Yahoo Finance."""
+    """Fetch stock OHLCV — Finnhub primary, Yahoo fallback."""
+    # Try Finnhub first
+    if config.FINNHUB_API_KEY:
+        resolution_map = {
+            "1m": "1", "5m": "5", "15m": "15", "30m": "30",
+            "1h": "60", "1d": "D", "1w": "W", "1M": "M",
+        }
+        resolution = resolution_map.get(interval, "D")
+        import time
+        to_ts = int(time.time())
+        from_ts = to_ts - (limit * 86400) if resolution == "D" else to_ts - (limit * 3600)
+        data = _finnhub_get("/stock/candle", {
+            "symbol": symbol, "resolution": resolution,
+            "from": str(from_ts), "to": str(to_ts),
+        })
+        if data and data.get("s") == "ok" and len(data.get("c", [])) > 0:
+            count = len(data["c"])
+            return [
+                {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "open_time": data["t"][i] * 1000,
+                    "close_time": data["t"][i] * 1000,
+                    "open": data["o"][i],
+                    "high": data["h"][i],
+                    "low": data["l"][i],
+                    "close": data["c"][i],
+                    "volume": data["v"][i],
+                    "source": "finnhub",
+                }
+                for i in range(count)
+            ]
+
+    # Fallback to Yahoo Finance
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        url = f"{config.YAHOO_FINANCE_URL}/{symbol}"
         data = _get(url, {"interval": interval, "range": f"{limit}d"})
         result = data.get("chart", {}).get("result", [{}])[0]
         timestamps = result.get("timestamp", [])
@@ -199,8 +293,82 @@ def fetch_stock_ohlcv(symbol: str, interval: str = "1d", limit: int = 100) -> li
                     "source": "yahoo_finance",
                 })
         return candles[-limit:]
-    except Exception:
+    except Exception as e:
+        logger.debug("Stock OHLCV fetch failed for %s: %s", symbol, e, exc_info=True)
         return []
+
+
+def fetch_stock_recommendations(symbol: str) -> list[dict]:
+    """Fetch analyst recommendations for a stock (Finnhub)."""
+    if not config.FINNHUB_API_KEY:
+        return []
+    data = _finnhub_get("/stock/recommendation", {"symbol": symbol})
+    if not data or not isinstance(data, list):
+        return []
+    return [
+        {
+            "period": item.get("period"),
+            "strong_buy": item.get("strongBuy", 0),
+            "buy": item.get("buy", 0),
+            "hold": item.get("hold", 0),
+            "sell": item.get("sell", 0),
+            "strong_sell": item.get("strongSell", 0),
+        }
+        for item in data[:5]
+    ]
+
+
+def fetch_stock_earnings(symbol: str, limit: int = 8) -> list[dict]:
+    """Fetch earnings history for a stock (Finnhub)."""
+    if not config.FINNHUB_API_KEY:
+        return []
+    data = _finnhub_get("/stock/earnings", {"symbol": symbol})
+    if not data or not isinstance(data, list):
+        return []
+    return [
+        {
+            "symbol": symbol,
+            "period": item.get("period"),
+            "surprise": item.get("surprise"),
+            "surprise_percent": item.get("surprisePercent"),
+            "actual": item.get("actual"),
+            "estimate": item.get("estimate"),
+            "year": item.get("year"),
+            "quarter": item.get("quarter"),
+        }
+        for item in data[:limit]
+    ]
+
+
+def fetch_stock_insider(symbol: str, days_back: int = 30) -> dict:
+    """Fetch insider transactions for a stock (Finnhub)."""
+    if not config.FINNHUB_API_KEY:
+        return {"error": "Finnhub API key required", "symbol": symbol}
+    import time
+    to_date = time.strftime("%Y-%m-%d")
+    from_date = time.strftime("%Y-%m-%d", time.gmtime(time.time() - days_back * 86400))
+    data = _finnhub_get("/stock/insider-transactions", {
+        "symbol": symbol, "from": from_date, "to": to_date,
+    })
+    if not data or "data" not in data:
+        return {"error": "Finnhub insider data unavailable", "symbol": symbol}
+    return {
+        "symbol": symbol,
+        "total_transactions": len(data["data"]),
+        "transactions": [
+            {
+                "name": t.get("name"),
+                "share": t.get("share"),
+                "change": t.get("change"),
+                "transaction_price": t.get("transactionPrice"),
+                "transaction_quantity": t.get("transactionQuantity"),
+                "transaction_date": t.get("transactionDate"),
+                "transaction_code": t.get("transactionCode"),
+            }
+            for t in data["data"][:15]
+        ],
+        "source": "finnhub",
+    }
 
 
 # === Unified Interface ===

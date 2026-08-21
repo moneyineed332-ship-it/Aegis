@@ -1,134 +1,171 @@
-"""AEGIS MVP API: paper trading only; no exchange credentials are accepted."""
+"""AEGIS MVP API: paper trading and live trading modes."""
 
+import hmac
+import logging
+import time
+import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
-from . import advisor, ai_analyst, backtesting, backtesting_advanced, binance_testnet, coach, data_quality, deployment, execution, features, free_apis, grid, journal, lab, market_data, mean_reversion, memory, ml_regime, multi_asset, optimizer, regime, risk, settings, storage, strategy_registry, supervisor
+from . import advisor, backtesting, backtesting_advanced, binance_testnet, coach, config, data_quality, deployment, engine, execution, features, journal, lab, learning, market_data, memory, ml_regime, multi_asset, oms, optimizer, position_monitor, regime, risk, security, storage, strategy_registry, supervisor
+from .routers import backtesting as backtesting_router, market as market_router, risk as risk_router, ai as ai_router, free_apis as free_apis_router
+from .logging_config import setup_logging, request_id_var
+from . import metrics as app_metrics
 
-app = FastAPI(title="AEGIS AI Quant MVP", version="0.1.0")
+logger = logging.getLogger(__name__)
+
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup/shutdown lifecycle for the FastAPI app."""
+    # --- Startup ---
+    setup_logging(level="INFO")
+    logger.info("AEGIS AI Quant starting up")
+
+    storage.initialize()
+    logger.info("Database initialized")
+
+    # Clean stale positions from previous sessions
+    cleaned = storage.cleanup_stale_positions()
+    if cleaned:
+        logger.info("Cleaned %d stale position(s)", cleaned)
+
+    # Start engine if enabled
+    if config.ENGINE_ENABLED:
+        try:
+            await engine.start_engine()
+            logger.info("Autonomous engine started (ENGINE_ENABLED=true)")
+        except Exception as exc:
+            logger.error("Failed to start engine: %s", exc)
+
+    yield
+
+    # --- Shutdown ---
+    if config.ENGINE_ENABLED:
+        try:
+            await engine.stop_engine()
+            logger.info("Autonomous engine stopped")
+        except Exception as exc:
+            logger.error("Failed to stop engine: %s", exc)
+
+    logger.info("AEGIS AI Quant shut down")
+
+
+app = FastAPI(title="AEGIS AI Quant", version="0.2.0", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.API_ORIGINS,
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
+    allow_origins=config.CORS_ORIGINS,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Authorization", "Content-Type", "X-AEGIS-Admin-Token"],
 )
 
-INITIAL_CAPITAL = settings.PAPER_CAPITAL
-MAX_ORDER_NOTIONAL = 500.0
-MAX_TOTAL_EXPOSURE = 2_000.0
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """Track request metrics, assign request IDs, and log access."""
+    req_id = request.headers.get("X-Request-ID", uuid.uuid4().hex[:12])
+    request_id_var.set(req_id)
+
+    start = time.perf_counter()
+    response = await call_next(request)
+    elapsed = time.perf_counter() - start
+
+    path = request.url.path
+    if path.startswith("/api/"):
+        method = request.method
+        status = str(response.status_code)
+        app_metrics.http_requests_total.labels(method=method, path=path, status=status).inc()
+        app_metrics.http_request_duration_seconds.labels(method=method, path=path).observe(elapsed)
+
+    response.headers["X-Request-ID"] = req_id
+    return response
+
+# Include routers
+app.include_router(backtesting_router.router)
+app.include_router(market_router.router)
+app.include_router(risk_router.router)
+app.include_router(ai_router.router)
+app.include_router(free_apis_router.router)
+
+# ICT Dashboard router (initialize with instances)
+try:
+    from .trade_journal import trade_journal
+    from .routers.ict_dashboard import initialize_dashboard
+    
+    # Initialize dashboard (risk/position managers resolved from engine)
+    initialize_dashboard(trade_journal=trade_journal)
+    from .routers import ict_dashboard as ict_dashboard_router
+    app.include_router(ict_dashboard_router.router)
+    logger.info("ICT Dashboard router initialized")
+except ImportError as e:
+    logger.warning(f"Could not initialize ICT Dashboard router: {e}")
+
+# Utiliser le capital ICT/SMC si configuré, sinon capital standard
+INITIAL_CAPITAL = config.ICT_PAPER_CAPITAL
+MAX_ORDER_NOTIONAL = config.MAX_ORDER_NOTIONAL
+MAX_TOTAL_EXPOSURE = config.MAX_TOTAL_EXPOSURE
+
+# Dashboard cache (TTL 5 seconds)
+_dashboard_cache: dict = {"data": None, "timestamp": 0}
+DASHBOARD_CACHE_TTL = 5  # seconds
 
 
 class PaperOrder(BaseModel):
-    symbol: str = Field(pattern=r"^[A-Z0-9]+/[A-Z0-9]+$")
+    symbol: str = Field(pattern=r"^[A-Z0-9]+(/[A-Z0-9]+)?$")
     side: Literal["buy", "sell"]
     quantity: float = Field(gt=0, le=10)
     reference_price: float = Field(gt=0)
-
-
-class Position(BaseModel):
-    symbol: str
-    quantity: float
-    average_price: float
-
-
-class SmaBacktestRequest(BaseModel):
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT"
-    interval: Literal["5m", "15m", "1h", "4h"] = "1h"
-    fast_period: int = Field(default=20, ge=2, le=100)
-    slow_period: int = Field(default=50, ge=3, le=300)
-    initial_capital: float = Field(default=10_000, gt=0, le=1_000_000)
-    allocation: float = Field(default=0.95, gt=0, le=1)
-    fee_bps: float = Field(default=10, ge=0, le=100)
-    slippage_bps: float = Field(default=5, ge=0, le=100)
-
-
-class WalkForwardRequest(BaseModel):
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT"
-    interval: Literal["5m", "15m", "1h", "4h"] = "1h"
-    train_candles: int = Field(default=500, ge=100, le=5_000)
-    test_candles: int = Field(default=200, ge=100, le=2_000)
-    initial_capital: float = Field(default=10_000, gt=0, le=1_000_000)
-    allocation: float = Field(default=0.95, gt=0, le=1)
-    fee_bps: float = Field(default=10, ge=0, le=100)
-    slippage_bps: float = Field(default=5, ge=0, le=100)
-    min_volatility: float = Field(default=0.01, ge=0, le=0.2)
-
-
-class MeanReversionRequest(BaseModel):
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT"
-    interval: Literal["5m", "15m", "1h", "4h"] = "1h"
-    entry_z_score: float = Field(default=-2.0, ge=-3.0, le=-1.0)
-    exit_z_score: float = Field(default=0.0, ge=-0.5, le=0.5)
-    period: int = Field(default=20, ge=10, le=50)
-    initial_capital: float = Field(default=10_000, gt=0, le=1_000_000)
-    allocation: float = Field(default=0.95, gt=0, le=1)
-    fee_bps: float = Field(default=10, ge=0, le=100)
-    slippage_bps: float = Field(default=5, ge=0, le=100)
-
-
-class MeanReversionWalkForwardRequest(BaseModel):
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT"
-    interval: Literal["5m", "15m", "1h", "4h"] = "1h"
-    train_candles: int = Field(default=500, ge=100, le=5_000)
-    test_candles: int = Field(default=200, ge=100, le=2_000)
-    initial_capital: float = Field(default=10_000, gt=0, le=1_000_000)
-    allocation: float = Field(default=0.95, gt=0, le=1)
-    fee_bps: float = Field(default=10, ge=0, le=100)
-    slippage_bps: float = Field(default=5, ge=0, le=100)
-    period: int = Field(default=20, ge=10, le=50)
-
-
-class GridRequest(BaseModel):
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT"
-    interval: Literal["5m", "15m", "1h", "4h"] = "1h"
-    grid_count: int = Field(default=10, ge=5, le=30)
-    grid_spread_pct: float = Field(default=0.02, ge=0.005, le=0.1)
-    initial_capital: float = Field(default=10_000, gt=0, le=1_000_000)
-    allocation: float = Field(default=0.95, gt=0, le=1)
-    fee_bps: float = Field(default=10, ge=0, le=100)
-    slippage_bps: float = Field(default=5, ge=0, le=100)
-
-
-class GridWalkForwardRequest(BaseModel):
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT"
-    interval: Literal["5m", "15m", "1h", "4h"] = "1h"
-    train_candles: int = Field(default=500, ge=100, le=5_000)
-    test_candles: int = Field(default=200, ge=100, le=2_000)
-    initial_capital: float = Field(default=10_000, gt=0, le=1_000_000)
-    allocation: float = Field(default=0.95, gt=0, le=1)
-    fee_bps: float = Field(default=10, ge=0, le=100)
-    slippage_bps: float = Field(default=5, ge=0, le=100)
-    grid_count: int = Field(default=10, ge=5, le=30)
-    grid_spread_pct: float = Field(default=0.02, ge=0.005, le=0.1)
-
-
-@app.on_event("startup")
-def initialize_storage() -> None:
-    storage.initialize()
 
 
 def current_exposure(positions: list[dict]) -> float:
     return sum(abs(position["quantity"] * position["average_price"]) for position in positions)
 
 
-def require_admin_token(x_aegis_admin_token: str | None = Header(default=None)) -> None:
-    if not settings.ADMIN_TOKEN or x_aegis_admin_token != settings.ADMIN_TOKEN:
-        raise HTTPException(401, "Administrator token is required.")
+def require_admin_token(
+    request: Request,
+    x_aegis_admin_token: str | None = Header(default=None),
+) -> None:
+    token = x_aegis_admin_token
+    if not token:
+        token = request.query_params.get("token")
+    from .deps import require_admin_token as _require_admin_token
+    _require_admin_token(token)
 
 
-@app.get("/health")
-def health() -> dict:
-    return {**supervisor.status(storage.get_kill_switch()), "timestamp": datetime.now(timezone.utc)}
+def _build_journal_data() -> dict:
+    decisions = storage.list_recent_decisions(limit=100)
+    prices = {s["symbol"]: s["price"] for s in storage.list_market_snapshots(limit=10)}
+    analyses = journal.analyze_decisions(decisions, prices)
+    feedback = journal.feedback_summary(analyses)
+    return {**analyses, "feedback": feedback}
 
 
 @app.get("/api/v1/dashboard")
 def dashboard() -> dict:
+    """Dashboard with 5-second TTL cache to avoid redundant recomputation."""
+    now = time.time()
+    
+    # Return cached data if still valid
+    if _dashboard_cache["data"] and (now - _dashboard_cache["timestamp"]) < DASHBOARD_CACHE_TTL:
+        return _dashboard_cache["data"]
+    
+    # Compute fresh dashboard
     positions = storage.list_positions()
-    candles = storage.list_ohlcv_candles("BTCUSDT", "1h", limit=500)
+    # Utiliser les symboles ICT/SMC si configurés, sinon fallback sur symboles existants
+    primary_symbol = config.ICT_PRIMARY_INSTRUMENT if hasattr(config, 'ICT_PRIMARY_INSTRUMENT') else (config.FOCUSED_SYMBOLS[0] if config.FOCUSED_MODE else "BTCUSDT")
+    candles = storage.list_ohlcv_candles(primary_symbol, "1h", limit=500)
     quality = data_quality.validate_ohlcv(candles, "1h")
     analysis = None
     risk_metrics = None
@@ -140,7 +177,8 @@ def dashboard() -> dict:
     # Live PnL computation
     recent_orders = storage.list_recent_orders(limit=100)
     exposure = current_exposure(positions)
-    equity_curve = storage.compute_equity_curve(INITIAL_CAPITAL, positions, recent_orders)
+    snapshots_prices = {s["symbol"]: s["price"] for s in storage.list_market_snapshots(limit=10)}
+    equity_curve = storage.compute_equity_curve(INITIAL_CAPITAL, positions, recent_orders, snapshots_prices)
     current_equity = equity_curve[-1]["equity"] if equity_curve else INITIAL_CAPITAL
     realized_pnl = current_equity - INITIAL_CAPITAL
 
@@ -154,23 +192,23 @@ def dashboard() -> dict:
             stress_test_data = risk.stress_test(candles, INITIAL_CAPITAL, btc_position_value)
         except (ValueError, Exception):
             pass
-    # Correlation across all symbols
-    try:
-        assets = {}
-        for sym in ("BTCUSDT", "ETHUSDT", "SOLUSDT"):
-            sym_candles = storage.list_ohlcv_candles(sym, "1h", limit=200)
-            if sym_candles:
-                assets[sym] = [c["close"] for c in sym_candles]
-        if len(assets) >= 2:
-            correlation_data = risk.correlation_matrix(assets)
-    except Exception:
-        pass
+        # Correlation across all symbols
+        try:
+            assets = {}
+            for sym in (config.FOCUSED_SYMBOLS if config.FOCUSED_MODE else ("BTCUSDT", "ETHUSDT", "SOLUSDT")):
+                sym_candles = storage.list_ohlcv_candles(sym, "1h", limit=200)
+                if sym_candles:
+                    assets[sym] = [c["close"] for c in sym_candles]
+            if len(assets) >= 2:
+                correlation_data = risk.correlation_matrix(assets)
+        except Exception as e:
+            logger.debug("Correlation matrix failed: %s", e, exc_info=True)
     # Concentration
     snapshots = storage.list_market_snapshots(limit=10)
     prices = {s["symbol"]: s["price"] for s in snapshots}
     concentration_data = risk.concentration_risk(positions, prices)
 
-    return {
+    result = {
         "mode": "paper",
         "capital": INITIAL_CAPITAL,
         "exposure": exposure,
@@ -197,107 +235,58 @@ def dashboard() -> dict:
         "funding_rates": storage.list_funding_rates(limit=3),
         "open_interest": storage.list_open_interest(limit=3),
         "memory": memory.summarize_episodes(storage.list_memory_episodes(limit=200)),
-        "journal": journal.analyze_decisions(storage.list_recent_decisions(limit=100), {s["symbol"]: s["price"] for s in storage.list_market_snapshots(limit=10)}),
+        "journal": _build_journal_data(),
     }
+    
+    # Update cache
+    _dashboard_cache["data"] = result
+    _dashboard_cache["timestamp"] = now
+    
+    return result
 
 
 @app.post("/api/v1/paper-orders", status_code=201)
 def create_paper_order(order: PaperOrder) -> dict:
     if storage.get_kill_switch():
         raise HTTPException(423, "Emergency stop is active; paper orders are blocked.")
+    symbol = storage.normalize_symbol(order.symbol)
     notional = order.quantity * order.reference_price
     if notional > MAX_ORDER_NOTIONAL:
         raise HTTPException(422, f"Order exceeds the paper limit of ${MAX_ORDER_NOTIONAL:.0f}.")
     positions = storage.list_positions()
-    current = next((position for position in positions if position["symbol"] == order.symbol), None)
+    current = next((position for position in positions if position["symbol"] == symbol), None)
     signed_quantity = order.quantity if order.side == "buy" else -order.quantity
     new_quantity = signed_quantity + (current["quantity"] if current else 0)
-    new_average_price = order.reference_price if not current or new_quantity == 0 else current["average_price"]
-    next_positions = [position for position in positions if position["symbol"] != order.symbol]
+    if not current or new_quantity == 0:
+        new_average_price = order.reference_price
+    else:
+        total_cost = current["average_price"] * current["quantity"] + order.reference_price * signed_quantity
+        new_average_price = abs(total_cost / new_quantity) if new_quantity != 0 else order.reference_price
+    next_positions = [position for position in positions if position["symbol"] != symbol]
     if new_quantity:
-        next_positions.append({"symbol": order.symbol, "quantity": new_quantity, "average_price": new_average_price})
+        next_positions.append({"symbol": symbol, "quantity": new_quantity, "average_price": new_average_price})
     if current_exposure(next_positions) > MAX_TOTAL_EXPOSURE:
         raise HTTPException(422, "Order exceeds the total paper exposure limit.")
 
     position = None if new_quantity == 0 else {
-        "symbol": order.symbol,
+        "symbol": symbol,
         "quantity": new_quantity,
         "average_price": new_average_price,
     }
     return storage.save_order_and_position({
         **order.model_dump(),
+        "symbol": symbol,
         "notional": notional,
+        "status": "filled_simulated",
+        "strategy": "manual",
+        "mode": "paper",
     }, position)
 
-
-@app.get("/api/v1/market-snapshots")
-def market_snapshots() -> list[dict]:
-    return storage.list_market_snapshots()
-
-
-@app.post("/api/v1/market-snapshots/refresh", status_code=201)
-def refresh_market_snapshots() -> list[dict]:
-    try:
-        snapshots = market_data.fetch_spot_prices()
-    except OSError as error:
-        raise HTTPException(502, "Public market-data source is unavailable.") from error
-    return storage.save_market_snapshots(snapshots)
-
-
-@app.get("/api/v1/fear-greed")
-def fear_greed() -> list[dict]:
-    return storage.list_fear_greed()
-
-
-@app.post("/api/v1/fear-greed/refresh", status_code=201)
-def refresh_fear_greed() -> dict:
-    try:
-        data = market_data.fetch_fear_greed()
-    except (OSError, KeyError) as error:
-        raise HTTPException(502, "Fear & Greed source is unavailable.") from error
-    return storage.save_fear_greed(data)
-
-
-@app.get("/api/v1/funding-rates")
-def funding_rates(symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> list[dict]:
-    return storage.list_funding_rates(symbol)
-
-
-@app.post("/api/v1/funding-rates/refresh", status_code=201)
-def refresh_funding_rates(symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> dict:
-    try:
-        data = market_data.fetch_funding_rates(symbol)
-    except OSError as error:
-        raise HTTPException(502, "Binance Futures source is unavailable.") from error
-    return storage.save_funding_rate(data)
-
-
-@app.get("/api/v1/open-interest")
-def open_interest(symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> list[dict]:
-    return storage.list_open_interest(symbol)
-
-
-@app.post("/api/v1/open-interest/refresh", status_code=201)
-def refresh_open_interest(symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> dict:
-    try:
-        data = market_data.fetch_open_interest(symbol)
-    except OSError as error:
-        raise HTTPException(502, "Binance Futures source is unavailable.") from error
-    return storage.save_open_interest(data)
-
-
-@app.get("/api/v1/ohlcv")
-def ohlcv(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
-    interval: Literal["5m", "15m", "1h", "4h"] = "1h",
-    limit: int = Query(default=200, ge=10, le=500),
-) -> list[dict]:
-    return storage.list_ohlcv_candles(symbol, interval, limit)
 
 
 @app.get("/api/v1/data-quality/ohlcv")
 def ohlcv_quality(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
 ) -> dict:
     return data_quality.validate_ohlcv(storage.list_ohlcv_candles(symbol, interval, limit=5_000), interval)
@@ -305,7 +294,7 @@ def ohlcv_quality(
 
 @app.get("/api/v1/risk/summary")
 def risk_summary(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=500)
@@ -315,41 +304,6 @@ def risk_summary(
         raise HTTPException(422, str(error)) from error
     return {"mode": "paper", "capital": INITIAL_CAPITAL, "exposure": current_exposure(storage.list_positions()), **metrics}
 
-
-@app.get("/api/v1/risk/stress-test")
-def risk_stress_test(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
-    interval: Literal["5m", "15m", "1h", "4h"] = "1h",
-) -> dict:
-    candles = storage.list_ohlcv_candles(symbol, interval, limit=500)
-    positions = storage.list_positions()
-    position_value = sum(abs(p["quantity"] * p["average_price"]) for p in positions if p["symbol"] == symbol)
-    try:
-        return risk.stress_test(candles, INITIAL_CAPITAL, position_value)
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from error
-
-
-@app.get("/api/v1/risk/correlation")
-def risk_correlation(
-    interval: Literal["5m", "15m", "1h", "4h"] = "1h",
-) -> dict:
-    assets = {}
-    for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT"):
-        candles = storage.list_ohlcv_candles(symbol, interval, limit=200)
-        if candles:
-            assets[symbol] = [c["close"] for c in candles]
-    if len(assets) < 2:
-        raise HTTPException(422, "Need at least 2 assets with data for correlation.")
-    return risk.correlation_matrix(assets)
-
-
-@app.get("/api/v1/risk/concentration")
-def risk_concentration() -> dict:
-    positions = storage.list_positions()
-    snapshots = storage.list_market_snapshots(limit=10)
-    prices = {s["symbol"]: s["price"] for s in snapshots}
-    return risk.concentration_risk(positions, prices)
 
 
 @app.get("/api/v1/journal/analysis")
@@ -378,7 +332,7 @@ def journal_outcomes() -> list[dict]:
 
 @app.get("/api/v1/market-analysis")
 def market_analysis(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=100)
@@ -394,7 +348,7 @@ def market_analysis(
 
 @app.post("/api/v1/decisions/recommendation", status_code=201)
 def recommendation(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=500)
@@ -421,6 +375,25 @@ def strategies() -> list[dict]:
     return strategy_registry.list_strategies()
 
 
+@app.get("/api/v1/focus/status")
+def focus_status() -> dict:
+    """Phase 1 focused-mode summary: single strategy, limited symbols, max deals."""
+    return {
+        "focused_mode": config.FOCUSED_MODE,
+        "strategy": config.FOCUSED_STRATEGY,
+        "strategy_name": strategy_registry.get_strategy(config.FOCUSED_STRATEGY).get("name", config.FOCUSED_STRATEGY)
+        if strategy_registry.get_strategy(config.FOCUSED_STRATEGY) else config.FOCUSED_STRATEGY,
+        "symbols": config.FOCUSED_SYMBOLS,
+        "max_positions": config.MAX_POSITIONS,
+        "donchian_parameters": config.DONCHIAN_PARAMS,
+        "mode": config.MODE,
+        "tradable_strategies": [
+            s["id"] for s in strategy_registry.STRATEGIES
+            if strategy_registry.is_active(s["id"])
+        ],
+    }
+
+
 @app.get("/api/v1/coach/review")
 def coach_review() -> dict:
     backtests = storage.list_recent_backtests(limit=100)
@@ -435,7 +408,7 @@ def lab_promotions() -> list[dict]:
 
 
 @app.get("/api/v1/memory")
-def memory_list(symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> dict:
+def memory_list(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> dict:
     episodes = storage.list_memory_episodes(symbol, limit=100)
     return {
         "summary": memory.summarize_episodes(episodes),
@@ -445,7 +418,7 @@ def memory_list(symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") ->
 
 @app.post("/api/v1/memory/remember", status_code=201)
 def memory_remember(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     strategy: str = "unknown",
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, "1h", limit=100)
@@ -462,7 +435,7 @@ def memory_remember(
 
 @app.get("/api/v1/memory/compare")
 def memory_compare(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, "1h", limit=100)
     try:
@@ -479,24 +452,31 @@ def supervisor_status() -> dict:
 
 
 @app.post("/api/v1/supervisor/emergency-stop")
-def emergency_stop(_: str | None = Header(default=None, alias="X-AEGIS-Admin-Token")) -> dict:
-    require_admin_token(_)
+def emergency_stop(request: Request, x_aegis_admin_token: str | None = Header(default=None)) -> dict:
+    token = x_aegis_admin_token or request.query_params.get("token")
+    from .deps import require_admin_token as _check
+    _check(token)
     storage.set_kill_switch(True, "Emergency stop activated manually.")
     return supervisor.status(True)
 
 
 @app.post("/api/v1/supervisor/resume")
-def resume(_: str | None = Header(default=None, alias="X-AEGIS-Admin-Token")) -> dict:
-    require_admin_token(_)
+def resume(request: Request, x_aegis_admin_token: str | None = Header(default=None)) -> dict:
+    token = x_aegis_admin_token or request.query_params.get("token")
+    from .deps import require_admin_token as _check
+    _check(token)
     storage.set_kill_switch(False, "Service resumed manually after emergency stop.")
     return supervisor.status(False)
 
 
+@limiter.limit("10/minute")
 @app.post("/api/v1/execution/market-order", status_code=201)
 def execute_market_order(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    request: Request,
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     side: Literal["buy", "sell"] = "buy",
     quantity: float = 0.001,
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     if storage.get_kill_switch():
         raise HTTPException(423, "Emergency stop is active.")
@@ -507,25 +487,32 @@ def execute_market_order(
     result = execution.market_order(symbol, side, quantity, current_price)
     if result["status"] == "filled":
         notional = result["fill_price"] * quantity
-        if notional > 500:
-            raise HTTPException(422, "Order exceeds paper limit of $500.")
+        if notional > config.MAX_ORDER_NOTIONAL:
+            raise HTTPException(422, f"Order exceeds paper limit of ${config.MAX_ORDER_NOTIONAL}.")
         order_data = {"symbol": symbol, "side": side, "quantity": quantity, "reference_price": result["fill_price"], "notional": notional}
         signed_quantity = quantity if side == "buy" else -quantity
         positions = storage.list_positions()
         current = next((p for p in positions if p["symbol"] == symbol), None)
         new_quantity = signed_quantity + (current["quantity"] if current else 0)
-        new_avg = result["fill_price"] if not current or new_quantity == 0 else current["average_price"]
+        if not current or new_quantity == 0:
+            new_avg = result["fill_price"]
+        else:
+            total_cost = current["average_price"] * current["quantity"] + result["fill_price"] * signed_quantity
+            new_avg = abs(total_cost / new_quantity) if new_quantity != 0 else result["fill_price"]
         position = None if new_quantity == 0 else {"symbol": symbol, "quantity": new_quantity, "average_price": new_avg}
         storage.save_order_and_position(order_data, position)
     return result
 
 
+@limiter.limit("10/minute")
 @app.post("/api/v1/execution/limit-order", status_code=201)
 def execute_limit_order(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    request: Request,
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     side: Literal["buy", "sell"] = "buy",
     quantity: float = 0.001,
     limit_price: float = 0,
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     if limit_price <= 0:
         raise HTTPException(422, "limit_price must be positive.")
@@ -536,10 +523,11 @@ def execute_limit_order(
 
 @app.post("/api/v1/execution/fractioned-order", status_code=201)
 def execute_fractioned_order(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     side: Literal["buy", "sell"] = "buy",
     quantity: float = 0.01,
     chunks: int = 3,
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     if storage.get_kill_switch():
         raise HTTPException(423, "Emergency stop is active.")
@@ -547,7 +535,24 @@ def execute_fractioned_order(
     if not snapshots:
         raise HTTPException(422, "No market data available.")
     current_price = snapshots[0]["price"]
-    return execution.fractioned_order(symbol, side, quantity, current_price, chunks)
+    result = execution.fractioned_order(symbol, side, quantity, current_price, chunks)
+    if result["status"] == "filled":
+        notional = result["total_notional"]
+        if notional > config.MAX_ORDER_NOTIONAL:
+            raise HTTPException(422, f"Order exceeds paper limit of ${config.MAX_ORDER_NOTIONAL}.")
+        order_data = {"symbol": symbol, "side": side, "quantity": result["total_filled"], "reference_price": result["avg_fill_price"], "notional": notional}
+        signed_quantity = result["total_filled"] if side == "buy" else -result["total_filled"]
+        positions = storage.list_positions()
+        current = next((p for p in positions if p["symbol"] == symbol), None)
+        new_quantity = signed_quantity + (current["quantity"] if current else 0)
+        if not current or new_quantity == 0:
+            new_avg = result["avg_fill_price"]
+        else:
+            total_cost = current["average_price"] * current["quantity"] + result["avg_fill_price"] * signed_quantity
+            new_avg = abs(total_cost / new_quantity) if new_quantity != 0 else result["avg_fill_price"]
+        position = None if new_quantity == 0 else {"symbol": symbol, "quantity": new_quantity, "average_price": new_avg}
+        storage.save_order_and_position(order_data, position)
+    return result
 
 
 @app.post("/api/v1/execution/estimate-slippage")
@@ -555,10 +560,13 @@ def estimate_slippage(order_value: float = 100) -> dict:
     return {"order_value": order_value, "estimated_slippage_bps": execution.estimate_slippage(order_value)}
 
 
+@limiter.limit("5/minute")
 @app.post("/api/v1/deployment/pipeline", status_code=201)
 def create_deployment_pipeline(
+    request: Request,
     strategy_id: str = "sma_crossover_long_flat",
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     return deployment.create_pipeline(strategy_id, symbol, {})
 
@@ -579,7 +587,7 @@ def validate_deployment_backtest(
 
 @app.post("/api/v1/ohlcv/refresh", status_code=201)
 def refresh_ohlcv(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
     limit: int = Query(default=200, ge=10, le=500),
 ) -> dict:
@@ -590,134 +598,13 @@ def refresh_ohlcv(
     return {"stored": storage.save_ohlcv_candles(candles), "symbol": symbol, "interval": interval}
 
 
-@app.post("/api/v1/ohlcv/refresh-history", status_code=201)
-def refresh_ohlcv_history(
-    symbol: Literal["BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
-    interval: Literal["5m", "15m", "1h", "4h"] = "1h",
-    batches: int = Query(default=4, ge=1, le=20),
-) -> dict:
-    end_time = None
-    stored = 0
-    try:
-        for _ in range(batches):
-            candles = market_data.fetch_ohlcv(symbol, interval, limit=500, end_time=end_time)
-            if not candles:
-                break
-            stored += storage.save_ohlcv_candles(candles)
-            end_time = candles[0]["open_time"] - 1
-    except OSError as error:
-        raise HTTPException(502, "Public OHLCV source is unavailable.") from error
-    return {"stored": stored, "symbol": symbol, "interval": interval, "batches": batches}
-
-
-@app.post("/api/v1/backtests/sma-crossover", status_code=201)
-def run_sma_backtest(request: SmaBacktestRequest) -> dict:
-    if request.fast_period >= request.slow_period:
-        raise HTTPException(422, "fast_period must be lower than slow_period.")
-    parameters = request.model_dump()
-    candles = storage.list_ohlcv_candles(request.symbol, request.interval, limit=500)
-    quality = data_quality.validate_ohlcv(candles, request.interval)
-    if not quality["valid"]:
-        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    try:
-        metrics = backtesting.run_sma_crossover(candles, parameters)
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from error
-    return storage.save_backtest("sma_crossover_long_flat", request.symbol, request.interval, parameters, metrics)
-
-
-@app.post("/api/v1/backtests/sma-crossover/walk-forward", status_code=201)
-def run_sma_walk_forward(request: WalkForwardRequest = WalkForwardRequest()) -> dict:
-    parameters = request.model_dump()
-    candles = storage.list_ohlcv_candles(request.symbol, request.interval, limit=request.train_candles + request.test_candles)
-    quality = data_quality.validate_ohlcv(candles, request.interval)
-    if not quality["valid"]:
-        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    try:
-        report = backtesting.run_walk_forward(candles, parameters, candidates=[(10, 30), (20, 50), (30, 100)])
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from error
-    return storage.save_backtest("sma_crossover_walk_forward", request.symbol, request.interval, parameters, report)
-
-
-@app.post("/api/v1/backtests/donchian-breakout/walk-forward", status_code=201)
-def run_donchian_walk_forward(request: WalkForwardRequest = WalkForwardRequest()) -> dict:
-    parameters = request.model_dump()
-    candles = storage.list_ohlcv_candles(request.symbol, request.interval, limit=request.train_candles + request.test_candles)
-    quality = data_quality.validate_ohlcv(candles, request.interval)
-    if not quality["valid"]:
-        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    try:
-        report = backtesting.run_donchian_walk_forward(candles, parameters, candidates=[(20, 10), (40, 20), (55, 20)])
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from error
-    return storage.save_backtest("donchian_breakout_walk_forward", request.symbol, request.interval, parameters, report)
-
-
-@app.post("/api/v1/backtests/mean-reversion", status_code=201)
-def run_mean_reversion_backtest(request: MeanReversionRequest) -> dict:
-    parameters = request.model_dump()
-    candles = storage.list_ohlcv_candles(request.symbol, request.interval, limit=500)
-    quality = data_quality.validate_ohlcv(candles, request.interval)
-    if not quality["valid"]:
-        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    try:
-        metrics = mean_reversion.run_mean_reversion(candles, parameters)
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from error
-    return storage.save_backtest("mean_reversion_bollinger", request.symbol, request.interval, parameters, metrics)
-
-
-@app.post("/api/v1/backtests/mean-reversion/walk-forward", status_code=201)
-def run_mean_reversion_walk_forward(request: MeanReversionWalkForwardRequest = MeanReversionWalkForwardRequest()) -> dict:
-    parameters = request.model_dump()
-    candles = storage.list_ohlcv_candles(request.symbol, request.interval, limit=request.train_candles + request.test_candles)
-    quality = data_quality.validate_ohlcv(candles, request.interval)
-    if not quality["valid"]:
-        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    try:
-        report = mean_reversion.run_mean_reversion_walk_forward(
-            candles, parameters, candidates=[(-1.5, -0.5), (-2.0, 0.0), (-2.5, 0.5)]
-        )
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from error
-    return storage.save_backtest("mean_reversion_walk_forward", request.symbol, request.interval, parameters, report)
-
-
-@app.post("/api/v1/backtests/grid", status_code=201)
-def run_grid_backtest(request: GridRequest) -> dict:
-    parameters = request.model_dump()
-    candles = storage.list_ohlcv_candles(request.symbol, request.interval, limit=500)
-    quality = data_quality.validate_ohlcv(candles, request.interval)
-    if not quality["valid"]:
-        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    try:
-        metrics = grid.run_grid(candles, parameters)
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from error
-    return storage.save_backtest("grid_adaptive", request.symbol, request.interval, parameters, metrics)
-
-
-@app.post("/api/v1/backtests/grid/walk-forward", status_code=201)
-def run_grid_walk_forward(request: GridWalkForwardRequest = GridWalkForwardRequest()) -> dict:
-    parameters = request.model_dump()
-    candles = storage.list_ohlcv_candles(request.symbol, request.interval, limit=request.train_candles + request.test_candles)
-    quality = data_quality.validate_ohlcv(candles, request.interval)
-    if not quality["valid"]:
-        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    try:
-        report = grid.run_grid_walk_forward(
-            candles, parameters, candidates=[(8, 0.01), (10, 0.02), (15, 0.03)]
-        )
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from error
-    return storage.save_backtest("grid_walk_forward", request.symbol, request.interval, parameters, report)
-
-
 # === Phase 3: Auto-Improvement & Optimization ===
 
 @app.post("/api/v1/optimizer/sma", status_code=200)
-def optimize_sma_strategy(symbol: str = "BTCUSDT", interval: str = "1h") -> dict:
+def optimize_sma_strategy(
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
     quality = data_quality.validate_ohlcv(candles, interval)
     if not quality["valid"]:
@@ -729,7 +616,10 @@ def optimize_sma_strategy(symbol: str = "BTCUSDT", interval: str = "1h") -> dict
 
 
 @app.post("/api/v1/optimizer/donchian", status_code=200)
-def optimize_donchian_strategy(symbol: str = "BTCUSDT", interval: str = "1h") -> dict:
+def optimize_donchian_strategy(
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
     quality = data_quality.validate_ohlcv(candles, interval)
     if not quality["valid"]:
@@ -741,7 +631,10 @@ def optimize_donchian_strategy(symbol: str = "BTCUSDT", interval: str = "1h") ->
 
 
 @app.post("/api/v1/optimizer/mean-reversion", status_code=200)
-def optimize_mean_reversion_strategy(symbol: str = "BTCUSDT", interval: str = "1h") -> dict:
+def optimize_mean_reversion_strategy(
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
     quality = data_quality.validate_ohlcv(candles, interval)
     if not quality["valid"]:
@@ -753,7 +646,10 @@ def optimize_mean_reversion_strategy(symbol: str = "BTCUSDT", interval: str = "1
 
 
 @app.post("/api/v1/optimizer/grid", status_code=200)
-def optimize_grid_strategy(symbol: str = "BTCUSDT", interval: str = "1h") -> dict:
+def optimize_grid_strategy(
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
     quality = data_quality.validate_ohlcv(candles, interval)
     if not quality["valid"]:
@@ -765,7 +661,10 @@ def optimize_grid_strategy(symbol: str = "BTCUSDT", interval: str = "1h") -> dic
 
 
 @app.post("/api/v1/optimizer/compare", status_code=200)
-def compare_all_strategies(symbol: str = "BTCUSDT", interval: str = "1h") -> dict:
+def compare_all_strategies(
+    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
     quality = data_quality.validate_ohlcv(candles, interval)
     if not quality["valid"]:
@@ -785,11 +684,16 @@ def compare_all_strategies(symbol: str = "BTCUSDT", interval: str = "1h") -> dic
 
 # === WebSocket Alerts ===
 
-from fastapi import WebSocket as FastAPIWebSocket
-from app.alerts import manager as alert_manager
+from .alerts import manager as alert_manager  # noqa: E402
 
 @app.websocket("/ws/alerts")
-async def websocket_alerts(websocket: FastAPIWebSocket):
+async def websocket_alerts(websocket: WebSocket):
+    """WebSocket endpoint for real-time alerts. Requires admin token if configured."""
+    token = websocket.query_params.get("token", "")
+    if config.ADMIN_TOKEN:
+        if not token or not hmac.compare_digest(token, config.ADMIN_TOKEN):
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
     await alert_manager.connect(websocket)
     try:
         while True:
@@ -811,35 +715,312 @@ def get_alert_thresholds() -> dict:
 
 
 @app.post("/api/v1/alerts/thresholds")
-def update_alert_thresholds(thresholds: dict) -> dict:
+def update_alert_thresholds(thresholds: dict, _admin: None = Depends(require_admin_token)) -> dict:
+    allowed_keys = set(alert_manager.thresholds.keys())
     for key, value in thresholds.items():
-        if key in alert_manager.thresholds:
+        if key in allowed_keys and isinstance(value, (int, float)):
             alert_manager.thresholds[key] = value
     return alert_manager.thresholds
 
 
 @app.post("/api/v1/alerts/check")
-def check_alerts() -> dict:
-    """Manually trigger alert checks on current data."""
-    candles = storage.list_ohlcv_candles("BTCUSDT", "1h", limit=200)
-    if len(candles) < 50:
-        return {"alerts": [], "error": "insufficient_data"}
+async def check_alerts() -> dict:
+    """Manually trigger alert checks on current data and broadcast to WS clients."""
+    from . import config as _cfg
+    all_alerts = []
+    for symbol in _cfg.SYMBOLS:
+        candles = storage.list_ohlcv_candles(symbol, "1h", limit=200)
+        if len(candles) < 50:
+            continue
+        feat = features.latest_features(candles)
+        positions = [p for p in storage.list_positions() if p["symbol"] == symbol]
+        snapshots_prices = {s["symbol"]: s["price"] for s in storage.list_market_snapshots(limit=10)}
+        equity_data = storage.compute_equity_curve(INITIAL_CAPITAL, positions, storage.list_recent_orders(100), snapshots_prices)
 
-    feat = features.latest_features(candles)
+        alerts = alert_manager.check_features(feat, positions, INITIAL_CAPITAL)
+        dd_alert = alert_manager.check_drawdown(equity_data)
+        if dd_alert:
+            alerts.append(dd_alert)
+
+        regime_result = regime.classify(feat)
+        regime_alert = alert_manager.check_regime(regime_result, symbol)
+        if regime_alert:
+            alerts.append(regime_alert)
+
+        for a in alerts:
+            a["symbol"] = symbol
+            await alert_manager.broadcast(a)
+        all_alerts.extend(alerts)
+
+    return {"alerts": all_alerts, "checked_at": datetime.now(timezone.utc).isoformat()}
+
+
+# === Position Monitoring ===
+
+@app.get("/api/v1/positions/monitor")
+def get_position_monitor() -> dict:
+    """Get real-time position monitoring data with PnL and risk metrics."""
     positions = storage.list_positions()
-    equity_data = storage.compute_equity_curve(INITIAL_CAPITAL, positions, storage.list_recent_orders(100))
+    snapshots = storage.list_market_snapshots(limit=10)
+    prices = {s["symbol"]: s["price"] for s in snapshots}
+    return position_monitor.monitor_cycle(prices)
 
-    alerts = alert_manager.check_features(feat, positions, INITIAL_CAPITAL)
-    dd_alert = alert_manager.check_drawdown(equity_data)
-    if dd_alert:
-        alerts.append(dd_alert)
 
-    regime_result = regime.classify(feat)
-    regime_alert = alert_manager.check_regime(regime_result)
-    if regime_alert:
-        alerts.append(regime_alert)
+@app.get("/api/v1/positions/pnl")
+def get_position_pnl() -> dict:
+    """Get PnL summary (unrealized + realized)."""
+    positions = storage.list_positions()
+    snapshots = storage.list_market_snapshots(limit=10)
+    prices = {s["symbol"]: s["price"] for s in snapshots}
+    capital = config.PAPER_CAPITAL
+    orders = storage.list_recent_orders(limit=200)
 
-    return {"alerts": alerts, "checked_at": datetime.now(timezone.utc).isoformat()}
+    portfolio = position_monitor.compute_portfolio_summary(positions, prices, capital)
+    realized = position_monitor.get_realized_pnl(orders)
+    portfolio["realized_pnl"] = realized["realized_pnl"]
+    portfolio["total_fees"] = realized["total_fees"]
+    portfolio["total_pnl"] = round(realized["realized_pnl"] + portfolio["total_unrealized_pnl"], 2)
+    portfolio["total_pnl_pct"] = round(
+        (portfolio["total_pnl"] / capital * 100) if capital > 0 else 0, 2
+    )
+    return portfolio
+
+
+@app.get("/api/v1/positions/risks")
+def get_position_risks() -> dict:
+    """Check positions against risk thresholds."""
+    positions = storage.list_positions()
+    snapshots = storage.list_market_snapshots(limit=10)
+    prices = {s["symbol"]: s["price"] for s in snapshots}
+    capital = config.PAPER_CAPITAL
+    alerts = position_monitor.check_position_risks(positions, prices, capital)
+    return {
+        "alerts": alerts,
+        "thresholds": {
+            "position_max_loss_pct": config.POSITION_MAX_LOSS_PCT * 100,
+            "position_max_drawdown_pct": config.POSITION_MAX_DRAWDOWN_PCT * 100,
+            "portfolio_max_drawdown_pct": config.PORTFOLIO_MAX_DRAWDOWN_PCT * 100,
+        },
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/v1/portfolio/correlation")
+def get_portfolio_correlation() -> dict:
+    """Multi-asset correlation analysis with dynamic sizing recommendations."""
+    from .multi_asset_correlation import compute_portfolio_correlation_risk
+    symbols = list(config.FOCUSED_SYMBOLS if config.FOCUSED_MODE else ("BTCUSDT", "ETHUSDT", "SOLUSDT"))
+    return compute_portfolio_correlation_risk(symbols)
+
+
+@app.get("/api/v1/portfolio/daily-report")
+def get_daily_report(date: str | None = None) -> dict:
+    """Generate comprehensive daily report with PnL, trades, regimes, and performance."""
+    from .daily_report import generate_daily_report
+    return generate_daily_report(date)
+
+
+class ClosePositionRequest(BaseModel):
+    symbol: str
+    side: str = "sell"
+
+
+@app.post("/api/v1/positions/close", status_code=200)
+def close_position(req: ClosePositionRequest, _admin: None = Depends(require_admin_token)) -> dict:
+    """Close a position by executing a market order in the opposite direction."""
+    if storage.get_kill_switch():
+        raise HTTPException(423, "Kill switch is active. Resume trading first.")
+    symbol = storage.normalize_symbol(req.symbol)
+    positions = storage.list_positions()
+    pos = next((p for p in positions if p["symbol"] == symbol), None)
+    if not pos or pos["quantity"] == 0:
+        raise HTTPException(404, f"No open position for {symbol}")
+
+    snapshots = storage.list_market_snapshots(limit=10)
+    prices = {storage.normalize_symbol(s["symbol"]): s["price"] for s in snapshots}
+    current_price = prices.get(symbol)
+    if not current_price:
+        raise HTTPException(422, f"No price data for {symbol}")
+
+    close_side = "sell" if pos["quantity"] > 0 else "buy"
+    quantity = abs(pos["quantity"])
+
+    result = oms.oms.submit_market_order(
+        symbol=symbol,
+        side=close_side,
+        quantity=quantity,
+        current_price=current_price,
+        strategy="manual",
+        reason=f"Manual close by user",
+    )
+    return {"closed": result.get("status") == "filled", "order": result}
+
+
+class ManualOrderRequest(BaseModel):
+    symbol: str = Field(pattern=r"^[A-Z0-9]+/[A-Z0-9]+$")
+    side: Literal["buy", "sell"]
+    order_type: Literal["market", "limit"] = "market"
+    quantity: float = Field(gt=0, le=10)
+    limit_price: float | None = None
+
+
+@app.post("/api/v1/orders/manual", status_code=201)
+def place_manual_order(req: ManualOrderRequest, _admin: None = Depends(require_admin_token)) -> dict:
+    """Place a manual order (market or limit)."""
+    if storage.get_kill_switch():
+        raise HTTPException(423, "Kill switch is active. Resume trading first.")
+    symbol = storage.normalize_symbol(req.symbol)
+    snapshots = storage.list_market_snapshots(limit=10)
+    prices = {s["symbol"]: s["price"] for s in snapshots}
+    current_price = prices.get(symbol)
+    if not current_price:
+        raise HTTPException(422, f"No price data for {symbol}. Refresh market data first.")
+
+    if req.order_type == "limit" and req.limit_price is None:
+        raise HTTPException(422, "limit_price is required for limit orders")
+
+    if req.order_type == "limit":
+        result = execution.execute_limit_order(
+            symbol=symbol,
+            side=req.side,
+            quantity=req.quantity,
+            limit_price=req.limit_price,
+            current_price=current_price,
+            strategy="manual",
+        )
+    else:
+        result = oms.oms.submit_market_order(
+            symbol=symbol,
+            side=req.side,
+            quantity=req.quantity,
+            current_price=current_price,
+            strategy="manual",
+            reason="Manual order from UI",
+        )
+    return result
+
+
+@app.get("/api/v1/orders/open")
+def list_open_orders() -> dict:
+    """List all pending open limit orders."""
+    orders = storage.list_open_orders()
+    return {"count": len(orders), "orders": orders}
+
+
+@app.post("/api/v1/orders/cancel/{order_id}")
+def cancel_open_order_endpoint(order_id: str, _admin: None = Depends(require_admin_token)) -> dict:
+    """Cancel a pending open limit order."""
+    storage.cancel_open_order(order_id)
+    return {"status": "cancelled", "order_id": order_id}
+
+
+@app.websocket("/ws/positions")
+async def websocket_positions(websocket: WebSocket):
+    """Stream real-time position data every 5 seconds. Requires admin token if configured."""
+    token = websocket.query_params.get("token", "")
+    if config.ADMIN_TOKEN:
+        if not token or not hmac.compare_digest(token, config.ADMIN_TOKEN):
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+    await websocket.accept()
+    try:
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+                if data == "ping":
+                    await websocket.send_json({"type": "pong"})
+                    continue
+            except asyncio.TimeoutError:
+                pass
+
+            # Send current position state
+            positions = storage.list_positions()
+            snapshots = storage.list_market_snapshots(limit=10)
+            prices = {s["symbol"]: s["price"] for s in snapshots}
+            capital = config.PAPER_CAPITAL
+
+            portfolio = position_monitor.compute_portfolio_summary(positions, prices, capital)
+            portfolio["kill_switch"] = storage.get_kill_switch()
+            portfolio["mode"] = config.MODE
+
+            await websocket.send_json({"type": "position_update", "data": portfolio})
+    except WebSocketDisconnect:
+        pass
+
+
+# === Learning & Strategy Performance ===
+
+@app.get("/api/v1/learning/strategies")
+def get_strategy_performance() -> list[dict]:
+    """Get performance stats for all strategies, ranked by score."""
+    return learning.get_all_strategy_stats()
+
+
+@app.get("/api/v1/learning/strategies/{strategy_id}")
+def get_strategy_performance_detail(strategy_id: str) -> dict:
+    """Get detailed performance stats for a single strategy."""
+    return learning.get_strategy_stats(strategy_id)
+
+
+@app.get("/api/v1/learning/regime/{regime}")
+def get_strategies_for_regime(regime: str) -> list[dict]:
+    """Rank strategies by their performance in a given regime."""
+    return learning.rank_strategies_for_regime(regime)
+
+
+@app.get("/api/v1/learning/weights/{regime}")
+def get_adaptive_weights(regime: str) -> dict:
+    """Get adaptive strategy weights for the current regime."""
+    return learning.get_advisor_weights(regime)
+
+
+@app.get("/api/v1/learning/trades")
+def get_trade_outcomes(
+    strategy: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Get trade outcome records with optional filters."""
+    return storage.list_trade_outcomes(strategy=strategy, status=status, limit=limit)
+
+
+@app.get("/api/v1/learning/memory/{symbol}")
+def get_memory_consolidation(symbol: str) -> dict:
+    """Get consolidated memory patterns for a symbol."""
+    return learning.consolidate_memory(symbol)
+
+
+@app.get("/api/v1/learning/summary")
+def get_learning_summary() -> dict:
+    """Get a summary of the learning system state."""
+    all_stats = learning.get_all_strategy_stats()
+    outcomes = storage.list_trade_outcomes(limit=1000)
+    open_trades = [o for o in outcomes if o["status"] == "open"]
+    closed_trades = [o for o in outcomes if o["status"] == "closed"]
+
+    total_pnl = sum((o.get("pnl") or 0) for o in closed_trades)
+    win_count = sum(1 for o in closed_trades if (o.get("pnl") or 0) > 0)
+
+    return {
+        "strategies_tracked": len(all_stats),
+        "total_trades": len(outcomes),
+        "open_trades": len(open_trades),
+        "closed_trades": len(closed_trades),
+        "overall_win_rate": round(win_count / max(len(closed_trades), 1), 4),
+        "total_realized_pnl": round(total_pnl, 2),
+        "top_strategies": [
+            {"strategy": s.get("strategy_id"), "score": s.get("score", 0), "win_rate": s.get("win_rate", 0)}
+            for s in all_stats[:5]
+        ],
+    }
+
+
+# === Security ===
+
+@app.get("/api/v1/security/summary")
+def get_security_summary(_admin: None = Depends(require_admin_token)) -> dict:
+    """Get security event summary (admin only)."""
+    return security.get_security_summary()
 
 
 # === Advanced Backtesting ===
@@ -933,8 +1114,9 @@ def sensitivity(
 
 # === ML Regime Prediction ===
 
+@limiter.limit("2/minute")
 @app.post("/api/v1/ml/regime/train", status_code=201)
-def train_ml_regime(symbol: str = "BTCUSDT", interval: str = "1h", epochs: int = 200) -> dict:
+def train_ml_regime(request: Request, symbol: str = "BTCUSDT", interval: str = "1h", epochs: int = 200) -> dict:
     """Train ML regime predictor from historical features."""
     candles = storage.list_ohlcv_candles(symbol, interval, limit=5000)
     if len(candles) < 200:
@@ -1001,37 +1183,37 @@ def binance_testnet_price(symbol: str = "BTCUSDT") -> dict:
 
 
 @app.get("/api/v1/binance/testnet/account")
-def binance_testnet_account() -> dict:
+def binance_testnet_account(_admin: None = Depends(require_admin_token)) -> dict:
     client = binance_testnet.BinanceTestnet()
     return client.get_account()
 
 
 @app.post("/api/v1/binance/testnet/order/market", status_code=201)
-def binance_testnet_market_order(symbol: str, side: str, quantity: float) -> dict:
+def binance_testnet_market_order(symbol: str, side: str, quantity: float, _admin: None = Depends(require_admin_token)) -> dict:
     client = binance_testnet.BinanceTestnet()
     return client.place_market_order(symbol, side, quantity)
 
 
 @app.post("/api/v1/binance/testnet/order/limit", status_code=201)
-def binance_testnet_limit_order(symbol: str, side: str, quantity: float, price: float) -> dict:
+def binance_testnet_limit_order(symbol: str, side: str, quantity: float, price: float, _admin: None = Depends(require_admin_token)) -> dict:
     client = binance_testnet.BinanceTestnet()
     return client.place_limit_order(symbol, side, quantity, price)
 
 
 @app.delete("/api/v1/binance/testnet/order")
-def binance_testnet_cancel_order(symbol: str, order_id: int) -> dict:
+def binance_testnet_cancel_order(symbol: str, order_id: int, _admin: None = Depends(require_admin_token)) -> dict:
     client = binance_testnet.BinanceTestnet()
     return client.cancel_order(symbol, order_id)
 
 
 @app.get("/api/v1/binance/testnet/orders")
-def binance_testnet_orders(symbol: str | None = None) -> list[dict]:
+def binance_testnet_orders(symbol: str | None = None, _admin: None = Depends(require_admin_token)) -> list[dict]:
     client = binance_testnet.BinanceTestnet()
     return client.get_open_orders(symbol)
 
 
 @app.get("/api/v1/binance/testnet/klines")
-def binance_testnet_klines(symbol: str = "BTCUSDT", interval: str = "1h", limit: int = 500) -> list[dict]:
+def binance_testnet_klines(symbol: str = "BTCUSDT", interval: str = "1h", limit: int = 500, _admin: None = Depends(require_admin_token)) -> list[dict]:
     client = binance_testnet.BinanceTestnet()
     return client.get_klines(symbol, interval, limit)
 
@@ -1079,154 +1261,105 @@ def get_stock_price(symbol: str) -> dict:
     return multi_asset.fetch_stock_price(symbol)
 
 
-# === AI Analyst (Gemini) ===
-
-@app.get("/api/v1/ai/status")
-def ai_status() -> dict:
-    return ai_analyst.get_status()
 
 
-@app.post("/api/v1/ai/analyze-market", status_code=201)
-def ai_analyze_market(symbol: str = "BTCUSDT", interval: str = "1h") -> dict:
-    candles = storage.list_ohlcv_candles(symbol, interval, limit=100)
-    if not candles:
-        raise HTTPException(422, {"message": "No candle data available. Refresh market data first."})
-    feats = features.latest_features(candles)
-    risk_data = risk.historical_risk(candles, INITIAL_CAPITAL)
-    regime_data = regime.classify(feats)
-    return ai_analyst.analyze_market(candles, feats, risk_data, regime_data)
+# === Autonomous Engine Control ===
+
+@app.get("/api/v1/engine/status")
+def engine_status() -> dict:
+    """Get autonomous engine status."""
+    return engine.get_engine_status()
 
 
-@app.post("/api/v1/ai/assess-risk", status_code=201)
-def ai_assess_risk(symbol: str = "BTCUSDT", interval: str = "1h") -> dict:
-    candles = storage.list_ohlcv_candles(symbol, interval, limit=100)
-    if not candles:
-        raise HTTPException(422, {"message": "No candle data available."})
-    risk_data = risk.historical_risk(candles, INITIAL_CAPITAL)
-    positions = storage.list_positions()
-    return ai_analyst.assess_risk(candles, risk_data, positions)
+@app.post("/api/v1/engine/start")
+@limiter.limit("2/minute")
+async def engine_start(request: Request, _admin: None = Depends(require_admin_token)) -> dict:
+    """Start the autonomous trading engine."""
+    if storage.get_engine_state("status") == "running":
+        return {"status": "already_running"}
+    return await engine.start_engine()
 
 
-@app.post("/api/v1/ai/review-strategies", status_code=201)
-def ai_review_strategies() -> dict:
-    backtests = storage.list_recent_backtests(limit=10)
-    candles = storage.list_ohlcv_candles("BTCUSDT", "1h", limit=2000)
-    opt_results = {}
-    if candles:
-        try:
-            sma = optimizer.optimize_sma(candles, INITIAL_CAPITAL)
-            donchian = optimizer.optimize_donchian(candles, INITIAL_CAPITAL)
-            mr = optimizer.optimize_mean_reversion(candles, INITIAL_CAPITAL)
-            grid = optimizer.optimize_grid(candles, INITIAL_CAPITAL)
-            opt_results = optimizer.compare_strategies({
-                "sma_crossover": sma,
-                "donchian_breakout": donchian,
-                "mean_reversion": mr,
-                "grid_adaptive": grid,
-            })
-        except Exception:
-            opt_results = {"error": "Optimization failed"}
-    return ai_analyst.review_strategies(backtests, opt_results)
+@app.post("/api/v1/engine/stop")
+@limiter.limit("2/minute")
+async def engine_stop(request: Request, _admin: None = Depends(require_admin_token)) -> dict:
+    """Stop the autonomous trading engine."""
+    return await engine.stop_engine()
 
 
-@app.post("/api/v1/ai/analyze-sentiment", status_code=201)
-def ai_analyze_sentiment() -> dict:
-    market = {}
-    try:
-        market = market_data.fetch_spot_prices()
-    except Exception:
-        pass
-    fg = storage.list_fear_greed()
-    fr = {}
-    try:
-        fr = market_data.fetch_funding_rates("BTCUSDT")
-    except Exception:
-        pass
-    return ai_analyst.analyze_sentiment(market, fg, fr)
+@app.get("/api/v1/engine/logs")
+def engine_logs(limit: int = 50) -> list[dict]:
+    """Get recent engine log entries."""
+    return storage.list_engine_logs(limit)
 
 
-# === Free APIs (CoinGecko, DeFiLlama, PerpFinder, etc.) ===
-
-@app.get("/api/v1/free/coingecko/global")
-def free_coingecko_global() -> dict:
-    return free_apis.coingecko_global()
-
-
-@app.get("/api/v1/free/coingecko/trending")
-def free_coingecko_trending() -> list[dict]:
-    return free_apis.coingecko_trending()
+@app.get("/api/v1/engine/stats")
+def engine_stats() -> dict:
+    """Get engine statistics."""
+    return storage.get_engine_stats()
 
 
-@app.get("/api/v1/free/coingecko/gainers")
-def free_coingecko_gainers() -> list[dict]:
-    return free_apis.coingecko_top_gainers()
+@app.get("/api/v1/engine/signals")
+def engine_signals(limit: int = 20) -> list[dict]:
+    """Get recent trade signals."""
+    return storage.list_trade_signals(limit)
 
 
-@app.get("/api/v1/free/coingecko/losers")
-def free_coingecko_losers() -> list[dict]:
-    return free_apis.coingecko_top_losers()
+@app.post("/api/v1/engine/trigger/{task_name}")
+@limiter.limit("5/minute")
+def engine_trigger_task(request: Request, task_name: str, _admin: None = Depends(require_admin_token)) -> dict:
+    """Immediately trigger a specific engine task."""
+    from .scheduler import scheduler
+    if scheduler.trigger_now(task_name):
+        return {"triggered": task_name}
+    raise HTTPException(400, f"Task '{task_name}' not found or already running")
 
 
-@app.get("/api/v1/free/defillama/tvl")
-def free_defillama_tvl() -> dict:
-    return free_apis.defillama_tvl()
+# === Order Management System (OMS) ===
+
+@app.get("/api/v1/oms/status")
+def oms_status() -> dict:
+    """Get OMS status."""
+    from . import oms as _oms
+    return _oms.oms.get_status()
 
 
-@app.get("/api/v1/free/defillama/chains")
-def free_defillama_chains() -> list[dict]:
-    return free_apis.defillama_chains()
+@app.get("/api/v1/oms/orders")
+def oms_orders(limit: int = 50) -> list[dict]:
+    """Get recent orders from OMS."""
+    from . import oms as _oms
+    return _oms.oms.get_order_history(limit)
 
 
-@app.get("/api/v1/free/defillama/protocols")
-def free_defillama_protocols() -> list[dict]:
-    return free_apis.defillama_top_protocols()
+@app.get("/api/v1/oms/open")
+def oms_open_orders() -> list[dict]:
+    """Get open orders from exchange."""
+    from . import oms as _oms
+    return _oms.oms.get_open_orders()
 
 
-@app.get("/api/v1/free/defillama/yields")
-def free_defillama_yields() -> list[dict]:
-    return free_apis.defillama_yields()
+@app.get("/api/v1/oms/reconcile")
+def oms_reconcile(_admin: None = Depends(require_admin_token)) -> dict:
+    """Reconcile local positions with exchange state."""
+    from . import oms as _oms
+    return _oms.oms.reconcile_positions()
 
 
-@app.get("/api/v1/free/perpfinder/funding")
-def free_perpfinder_funding() -> list[dict]:
-    return free_apis.perpfinder_funding_rates()
+@app.get("/api/v1/oms/mode")
+def oms_mode() -> dict:
+    """Get current execution mode and limits."""
+    from . import execution as _execution
+    return _execution.get_execution_mode()
 
 
-@app.get("/api/v1/free/perpfinder/open-interest")
-def free_perpfinder_oi() -> list[dict]:
-    return free_apis.perpfinder_open_interest()
-
-
-@app.get("/api/v1/free/perpfinder/liquidations")
-def free_perpfinder_liquidations() -> list[dict]:
-    return free_apis.perpfinder_liquidations()
-
-
-@app.get("/api/v1/free/mempool/fees")
-def free_mempool_fees() -> dict:
-    return free_apis.mempool_fees()
-
-
-@app.get("/api/v1/free/dexscreener/trending")
-def free_dexscreener_trending() -> list[dict]:
-    return free_apis.dexscreener_trending()
-
-
-@app.get("/api/v1/free/polymarket/crypto")
-def free_polymarket_crypto() -> list[dict]:
-    return free_apis.polymarket_crypto_markets()
-
-
-@app.get("/api/v1/free/fear-greed/historical")
-def free_fear_greed_historical(limit: int = 30) -> list[dict]:
-    return free_apis.fear_greed_historical(limit)
-
-
-@app.get("/api/v1/free/blockstream")
-def free_blockstream() -> dict:
-    return free_apis.blockstream_info()
-
-
-@app.get("/api/v1/free/all")
-def free_all_data() -> dict:
-    return free_apis.get_all_free_data()
+@app.post("/api/v1/oms/mode")
+@limiter.limit("5/minute")
+def oms_set_mode(request: Request, mode: str = "paper", _admin: None = Depends(require_admin_token)) -> dict:
+    """Switch execution mode (paper/live). Requires admin token."""
+    if mode not in ("paper", "live"):
+        raise HTTPException(400, "Mode must be 'paper' or 'live'")
+    old_mode = config.MODE
+    config.MODE = mode
+    security.log_mode_switch(old_mode, mode)
+    storage.log_engine_event("mode-switch", "mode_changed", {"old_mode": old_mode, "new_mode": mode}, "warning")
+    return {"mode": mode, "message": f"Execution mode set to {mode}"}

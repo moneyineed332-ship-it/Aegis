@@ -17,6 +17,7 @@ data/
 .env
 .env.local
 .env.*.local
+.aegis_key
 
 # IDE
 .vscode/
@@ -42,3 +43,8 @@ htmlcov/
 # Misc
 *.tmp
 *.bak
+~$*
+
+# Playwright
+test-results/
+playwright-report/

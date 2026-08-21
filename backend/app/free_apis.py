@@ -1,24 +1,47 @@
 """Free API collectors — CoinGecko, DeFiLlama, PerpFinder, Mempool, DexScreener, etc."""
 
+import concurrent.futures
 import json
-import urllib.request
-import urllib.error
+import logging
+
+import httpx
+
+logger = logging.getLogger(__name__)
 from typing import Any
 
+from . import config
 
-def _get(url: str, timeout: int = 15) -> dict | list | None:
-    req = urllib.request.Request(url, headers={"User-Agent": "AEGIS-AI-Quant/1.0", "Accept": "application/json"})
+# Shared httpx client for connection pooling
+_http_client: httpx.Client | None = None
+
+
+def _get_http_client() -> httpx.Client:
+    """Get or create a shared httpx client."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.Client(
+            timeout=config.HTTP_TIMEOUT,
+            headers={"User-Agent": "AEGIS-AI-Quant/1.0", "Accept": "application/json"},
+            follow_redirects=True,
+        )
+    return _http_client
+
+
+def _get(url: str, timeout: int = config.HTTP_TIMEOUT) -> dict | list | None:
+    client = _get_http_client()
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception:
+        response = client.get(url, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.warning(f"API request failed: {e}")
         return None
 
 
 # ── CoinGecko (no key) ──────────────────────────────────────────────
 
 def coingecko_global() -> dict:
-    data = _get("https://api.coingecko.com/api/v3/global")
+    data = _get(f"{config.COINGECKO_URL}/global")
     if not data or "data" not in data:
         return {"error": "CoinGecko unavailable"}
     d = data["data"]
@@ -34,7 +57,7 @@ def coingecko_global() -> dict:
 
 
 def coingecko_trending() -> list[dict]:
-    data = _get("https://api.coingecko.com/api/v3/search/trending")
+    data = _get(f"{config.COINGECKO_URL}/search/trending")
     if not data or "coins" not in data:
         return []
     return [
@@ -49,7 +72,7 @@ def coingecko_trending() -> list[dict]:
 
 
 def coingecko_top_gainers() -> list[dict]:
-    data = _get("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h")
+    data = _get(f"{config.COINGECKO_URL}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h")
     if not data or not isinstance(data, list):
         return []
     sorted_data = sorted(data, key=lambda x: x.get("price_change_percentage_24h") or 0, reverse=True)
@@ -67,7 +90,7 @@ def coingecko_top_gainers() -> list[dict]:
 
 
 def coingecko_top_losers() -> list[dict]:
-    data = _get("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h")
+    data = _get(f"{config.COINGECKO_URL}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h")
     if not data or not isinstance(data, list):
         return []
     sorted_data = sorted(data, key=lambda x: x.get("price_change_percentage_24h") or 0)
@@ -87,7 +110,7 @@ def coingecko_top_losers() -> list[dict]:
 # ── DeFiLlama (no key) ──────────────────────────────────────────────
 
 def defillama_tvl() -> dict:
-    data = _get("https://api.llama.fi/v2/historicalChainTvl")
+    data = _get(f"{config.DEFILLAMA_URL}/v2/historicalChainTvl")
     if not data or not isinstance(data, list):
         return {"error": "DeFiLlama unavailable"}
     latest = data[-1] if data else {}
@@ -100,7 +123,7 @@ def defillama_tvl() -> dict:
 
 
 def defillama_chains() -> list[dict]:
-    data = _get("https://api.llama.fi/v2/chains")
+    data = _get(f"{config.DEFILLAMA_URL}/v2/chains")
     if not data or not isinstance(data, list):
         return []
     return [
@@ -110,7 +133,7 @@ def defillama_chains() -> list[dict]:
 
 
 def defillama_top_protocols() -> list[dict]:
-    data = _get("https://api.llama.fi/protocols")
+    data = _get(f"{config.DEFILLAMA_URL}/protocols")
     if not data or not isinstance(data, list):
         return []
     return [
@@ -128,7 +151,7 @@ def defillama_top_protocols() -> list[dict]:
 
 
 def defillama_yields() -> list[dict]:
-    data = _get("https://yields.llama.fi/pools")
+    data = _get(f"{config.DEFILLAMA_YIELDS_URL}/pools")
     if not data or "data" not in data:
         return []
     pools = data["data"]
@@ -152,7 +175,7 @@ def defillama_yields() -> list[dict]:
 # ── PerpFinder (no key) ─────────────────────────────────────────────
 
 def perpfinder_funding_rates() -> list[dict]:
-    data = _get("https://api.perpfinder.com/data/funding-rates")
+    data = _get(f"{config.PERPFINDER_URL}/data/funding-rates")
     if not data or not isinstance(data, list):
         return []
     return [
@@ -168,7 +191,7 @@ def perpfinder_funding_rates() -> list[dict]:
 
 
 def perpfinder_open_interest() -> list[dict]:
-    data = _get("https://api.perpfinder.com/data/open-interest")
+    data = _get(f"{config.PERPFINDER_URL}/data/open-interest")
     if not data or not isinstance(data, list):
         return []
     return [
@@ -183,7 +206,7 @@ def perpfinder_open_interest() -> list[dict]:
 
 
 def perpfinder_liquidations() -> list[dict]:
-    data = _get("https://api.perpfinder.com/data/liquidations")
+    data = _get(f"{config.PERPFINDER_URL}/data/liquidations")
     if not data or not isinstance(data, list):
         return []
     return [
@@ -201,7 +224,7 @@ def perpfinder_liquidations() -> list[dict]:
 # ── Mempool.space (no key) ──────────────────────────────────────────
 
 def mempool_fees() -> dict:
-    data = _get("https://mempool.space/api/v1/fees/recommended")
+    data = _get(f"{config.MEMPOOL_URL}/v1/fees/recommended")
     if not data:
         return {"error": "Mempool unavailable"}
     return {
@@ -214,7 +237,7 @@ def mempool_fees() -> dict:
 
 
 def mempool_mempool() -> dict:
-    data = _get("https://mempool.space/api/mempool")
+    data = _get(f"{config.MEMPOOL_URL}/mempool")
     if not data:
         return {"error": "Mempool unavailable"}
     return {
@@ -228,7 +251,7 @@ def mempool_mempool() -> dict:
 # ── DexScreener (no key) ────────────────────────────────────────────
 
 def dexscreener_trending() -> list[dict]:
-    data = _get("https://api.dexscreener.com/token-boosts/latest/v1")
+    data = _get(f"{config.DEXSCREENER_URL}/token-boosts/latest/v1")
     if not data or not isinstance(data, list):
         return []
     return [
@@ -243,7 +266,7 @@ def dexscreener_trending() -> list[dict]:
 
 
 def dexscreener_pairs(chain: str = "ethereum") -> list[dict]:
-    data = _get(f"https://api.dexscreener.com/latest/dex/pairs/{chain}/trending")
+    data = _get(f"{config.DEXSCREENER_URL}/latest/dex/pairs/{chain}/trending")
     if not data or "pairs" not in data:
         return []
     return [
@@ -262,7 +285,7 @@ def dexscreener_pairs(chain: str = "ethereum") -> list[dict]:
 # ── CoinPaprika (no key) ────────────────────────────────────────────
 
 def coinpaprika_global() -> dict:
-    data = _get("https://api.coinpaprika.com/v1/global")
+    data = _get(f"{config.COINPAPRIKA_URL}/v1/global")
     if not data:
         return {"error": "CoinPaprika unavailable"}
     return {
@@ -279,7 +302,7 @@ def coinpaprika_global() -> dict:
 # ── Frankfurter Forex (no key) ──────────────────────────────────────
 
 def frankfurter_forex(base: str = "USD") -> dict:
-    data = _get(f"https://api.frankfurter.app/latest?from={base}")
+    data = _get(f"{config.FRANKFURTER_URL}/latest?from={base}")
     if not data or "rates" not in data:
         return {"error": "Frankfurter unavailable"}
     return {
@@ -292,7 +315,7 @@ def frankfurter_forex(base: str = "USD") -> dict:
 # ── Polymarket (no key) ─────────────────────────────────────────────
 
 def polymarket_crypto_markets() -> list[dict]:
-    data = _get("https://gamma-api.polymarket.com/markets?limit=20&active=true&tag=Crypto")
+    data = _get(f"{config.POLYMARKET_URL}/markets?limit=20&active=true&tag=Crypto")
     if not data or not isinstance(data, list):
         return []
     return [
@@ -311,7 +334,7 @@ def polymarket_crypto_markets() -> list[dict]:
 # ── CoinLore (no key) ──────────────────────────────────────────────
 
 def coinlore_movers() -> dict:
-    data = _get("https://api.coinlore.net/api/tickers/?limit=50")
+    data = _get(f"{config.COINLORE_URL}/api/tickers/?limit=50")
     if not data or "data" not in data:
         return {"error": "CoinLore unavailable"}
     coins = data["data"]
@@ -332,14 +355,14 @@ def coinlore_movers() -> dict:
 # ── TerminalFeed (no key) ────────────────────────────────────────────
 
 def terminalfeed_briefing() -> dict:
-    data = _get("https://terminalfeed.io/api/briefing")
+    data = _get(f"{config.TERMINALFEED_URL}/api/briefing")
     if not data:
         return {"error": "TerminalFeed unavailable"}
     return data
 
 
 def terminalfeed_funding_rates() -> list[dict]:
-    data = _get("https://terminalfeed.io/api/funding-rates")
+    data = _get(f"{config.TERMINALFEED_URL}/api/funding-rates")
     if not data or not isinstance(data, list):
         return []
     return [
@@ -356,7 +379,7 @@ def terminalfeed_funding_rates() -> list[dict]:
 # ── Blockstream (no key) ────────────────────────────────────────────
 
 def blockstream_info() -> dict:
-    data = _get("https://blockstream.info/api/blocks/tip/height")
+    data = _get(f"{config.BLOCKSTREAM_URL}/blocks/tip/height")
     if data is None:
         return {"error": "Blockstream unavailable"}
     return {"block_height": data}
@@ -365,7 +388,7 @@ def blockstream_info() -> dict:
 # ── Alternative.me (already in market_data, but adding historical) ──
 
 def fear_greed_historical(limit: int = 30) -> list[dict]:
-    data = _get(f"https://api.alternative.me/fng/?limit={limit}&format=json")
+    data = _get(f"{config.FEAR_GREED_URL}?limit={limit}&format=json")
     if not data or "data" not in data:
         return []
     return [
@@ -378,28 +401,228 @@ def fear_greed_historical(limit: int = 30) -> list[dict]:
     ]
 
 
+# ── Finnhub (requires free API key) ──────────────────────────────────
+
+def _finnhub_get(endpoint: str, params: dict | None = None) -> dict | list | None:
+    """Internal helper for Finnhub API requests."""
+    if not config.FINNHUB_API_KEY:
+        return None
+    params = params or {}
+    params["token"] = config.FINNHUB_API_KEY
+    query = "&".join(f"{k}={v}" for k, v in params.items())
+    url = f"{config.FINNHUB_URL}{endpoint}?{query}"
+    return _get(url)
+
+
+def finnhub_stock_quote(symbol: str) -> dict:
+    """Fetch real-time stock quote (bid/ask/last)."""
+    data = _finnhub_get("/quote", {"symbol": symbol})
+    if not data or data.get("c") is None:
+        return {"error": "Finnhub quote unavailable", "symbol": symbol}
+    return {
+        "symbol": symbol,
+        "current_price": data.get("c", 0),
+        "open": data.get("o", 0),
+        "high": data.get("h", 0),
+        "low": data.get("l", 0),
+        "previous_close": data.get("pc", 0),
+        "change": data.get("d", 0),
+        "change_percent": data.get("dp", 0),
+        "source": "finnhub",
+    }
+
+
+def finnhub_stock_ohlcv(symbol: str, resolution: str = "D", days_back: int = 30) -> list[dict]:
+    """Fetch stock OHLCV candles.
+
+    resolution: '1','5','15','30','60','D','W','M'
+    """
+    import time as _time
+    to_ts = int(_time.time())
+    from_ts = to_ts - (days_back * 86400)
+    data = _finnhub_get("/stock/candle", {
+        "symbol": symbol, "resolution": resolution,
+        "from": str(from_ts), "to": str(to_ts),
+    })
+    if not data or data.get("s") != "ok":
+        return []
+    count = len(data.get("c", []))
+    return [
+        {
+            "timestamp": data["t"][i] * 1000,
+            "open": data["o"][i],
+            "high": data["h"][i],
+            "low": data["l"][i],
+            "close": data["c"][i],
+            "volume": data["v"][i],
+            "source": "finnhub",
+        }
+        for i in range(count)
+    ]
+
+
+def finnhub_company_news(symbol: str, days_back: int = 7) -> list[dict]:
+    """Fetch company news from Finnhub."""
+    import time as _time
+    to_date = _time.strftime("%Y-%m-%d")
+    from_date = _time.strftime("%Y-%m-%d", _time.gmtime(_time.time() - days_back * 86400))
+    data = _finnhub_get("/company-news", {
+        "symbol": symbol, "from": from_date, "to": to_date,
+    })
+    if not data or not isinstance(data, list):
+        return []
+    return [
+        {
+            "headline": item.get("headline"),
+            "summary": item.get("summary", "")[:200],
+            "source": item.get("source"),
+            "url": item.get("url"),
+            "published": item.get("datetime"),
+            "category": item.get("category"),
+        }
+        for item in data[:20]
+    ]
+
+
+def finnhub_earnings(symbol: str, limit: int = 8) -> list[dict]:
+    """Fetch earnings history for a stock."""
+    data = _finnhub_get("/stock/earnings", {"symbol": symbol})
+    if not data or not isinstance(data, list):
+        return []
+    return [
+        {
+            "symbol": symbol,
+            "period": item.get("period"),
+            "surprise": item.get("surprise"),
+            "surprise_percent": item.get("surprisePercent"),
+            "actual": item.get("actual"),
+            "estimate": item.get("estimate"),
+            "year": item.get("year"),
+            "quarter": item.get("quarter"),
+        }
+        for item in data[:limit]
+    ]
+
+
+def finnhub_insider_sentiment(symbol: str, days_back: int = 30) -> dict:
+    """Fetch insider sentiment for a stock."""
+    import time as _time
+    to_date = _time.strftime("%Y-%m-%d")
+    from_date = _time.strftime("%Y-%m-%d", _time.gmtime(_time.time() - days_back * 86400))
+    data = _finnhub_get("/stock/insider-transactions", {
+        "symbol": symbol, "from": from_date, "to": to_date,
+    })
+    if not data or "data" not in data:
+        return {"error": "Finnhub insider data unavailable", "symbol": symbol}
+    transactions = data["data"]
+    total_buy = sum(1 for t in transactions if t.get("transactionPrice") and t.get("transactionQuantity"))
+    return {
+        "symbol": symbol,
+        "total_transactions": len(transactions),
+        "transactions": [
+            {
+                "name": t.get("name"),
+                "share": t.get("share"),
+                "change": t.get("change"),
+                "transaction_price": t.get("transactionPrice"),
+                "transaction_quantity": t.get("transactionQuantity"),
+                "transaction_date": t.get("transactionDate"),
+                "transaction_code": t.get("transactionCode"),
+            }
+            for t in transactions[:15]
+        ],
+        "source": "finnhub",
+    }
+
+
+def finnhub_general_news(category: str = "general") -> list[dict]:
+    """Fetch general market news from Finnhub."""
+    data = _finnhub_get("/news", {"category": category})
+    if not data or not isinstance(data, list):
+        return []
+    return [
+        {
+            "headline": item.get("headline"),
+            "summary": item.get("summary", "")[:200],
+            "source": item.get("source"),
+            "url": item.get("url"),
+            "published": item.get("datetime"),
+            "category": item.get("category"),
+            "image": item.get("image"),
+        }
+        for item in data[:20]
+    ]
+
+
+def finnhub_recommendations(symbol: str) -> list[dict]:
+    """Fetch analyst recommendation trends for a stock."""
+    data = _finnhub_get("/stock/recommendation", {"symbol": symbol})
+    if not data or not isinstance(data, list):
+        return []
+    return [
+        {
+            "period": item.get("period"),
+            "strong_buy": item.get("strongBuy", 0),
+            "buy": item.get("buy", 0),
+            "hold": item.get("hold", 0),
+            "sell": item.get("sell", 0),
+            "strong_sell": item.get("strongSell", 0),
+        }
+        for item in data[:5]
+    ]
+
+
+def finnhub_forex_rates(base: str = "USD") -> dict:
+    """Fetch forex rates from Finnhub."""
+    data = _finnhub_get("/forex/rates", {"base": base})
+    if not data or "rates" not in data:
+        return {"error": "Finnhub forex unavailable"}
+    return {
+        "base": base,
+        "rates": {r.get("quote"): r.get("rate") for r in data["rates"] if r.get("quote")},
+        "source": "finnhub",
+    }
+
+
 # ── Aggregate all free API data ─────────────────────────────────────
 
 def get_all_free_data() -> dict:
-    return {
-        "coingecko_global": coingecko_global(),
-        "coingecko_trending": coingecko_trending(),
-        "coingecko_top_gainers": coingecko_top_gainers(),
-        "coingecko_top_losers": coingecko_top_losers(),
-        "defillama_tvl": defillama_tvl(),
-        "defillama_top_protocols": defillama_top_protocols(),
-        "defillama_yields": defillama_yields(),
-        "defillama_chains": defillama_chains(),
-        "perpfinder_funding": perpfinder_funding_rates(),
-        "perpfinder_open_interest": perpfinder_open_interest(),
-        "perpfinder_liquidations": perpfinder_liquidations(),
-        "mempool_fees": mempool_fees(),
-        "mempool_mempool": mempool_mempool(),
-        "dexscreener_trending": dexscreener_trending(),
-        "coinpaprika_global": coinpaprika_global(),
-        "coinlore_movers": coinlore_movers(),
-        "polymarket_crypto": polymarket_crypto_markets(),
-        "terminalfeed_briefing": terminalfeed_briefing(),
-        "blockstream": blockstream_info(),
-        "fear_greed_historical": fear_greed_historical(),
-    }
+    """Aggregate all free API data in parallel."""
+    functions = [
+        ("coingecko_global", coingecko_global),
+        ("coingecko_trending", coingecko_trending),
+        ("coingecko_top_gainers", coingecko_top_gainers),
+        ("coingecko_top_losers", coingecko_top_losers),
+        ("defillama_tvl", defillama_tvl),
+        ("defillama_top_protocols", defillama_top_protocols),
+        ("defillama_yields", defillama_yields),
+        ("defillama_chains", defillama_chains),
+        ("perpfinder_funding", perpfinder_funding_rates),
+        ("perpfinder_open_interest", perpfinder_open_interest),
+        ("perpfinder_liquidations", perpfinder_liquidations),
+        ("mempool_fees", mempool_fees),
+        ("mempool_mempool", mempool_mempool),
+        ("dexscreener_trending", dexscreener_trending),
+        ("coinpaprika_global", coinpaprika_global),
+        ("coinlore_movers", coinlore_movers),
+        ("polymarket_crypto", polymarket_crypto_markets),
+        ("terminalfeed_briefing", terminalfeed_briefing),
+        ("blockstream", blockstream_info),
+        ("fear_greed_historical", fear_greed_historical),
+        ("finnhub_quote_aapl", lambda: finnhub_stock_quote("AAPL")),
+        ("finnhub_news", lambda: finnhub_general_news("general")),
+        ("finnhub_forex", finnhub_forex_rates),
+    ]
+
+    results = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=config.FREE_API_WORKERS) as executor:
+        future_to_name = {executor.submit(fn): name for name, fn in functions}
+        for future in concurrent.futures.as_completed(future_to_name):
+            name = future_to_name[future]
+            try:
+                results[name] = future.result()
+            except Exception as e:
+                logger.debug("Free API worker failed for %s: %s", name, e, exc_info=True)
+                results[name] = None
+
+    return results

@@ -2,9 +2,13 @@
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from fastapi import WebSocket, WebSocketDisconnect
 from typing import Any
+from . import config
+
+logger = logging.getLogger(__name__)
 
 
 class AlertManager:
@@ -14,16 +18,16 @@ class AlertManager:
         self.connections: list[WebSocket] = []
         self.alert_history: list[dict] = []
         self.thresholds = {
-            "max_drawdown_pct": 15.0,
-            "var_95_pct": 5.0,
-            "rsi_overbought": 75.0,
-            "rsi_oversold": 25.0,
-            "volatility_spike": 0.05,
+            "max_drawdown_pct": config.ALERT_MAX_DRAWDOWN_PCT,
+            "var_95_pct": config.ALERT_VAR_95_PCT,
+            "rsi_overbought": config.ALERT_RSI_OVERBOUGHT,
+            "rsi_oversold": config.ALERT_RSI_OVERSOLD,
+            "volatility_spike": config.ALERT_VOLATILITY_SPIKE,
             "regime_change": True,
-            "position_limit_pct": 80.0,
-            "funding_rate_extreme": 0.001,
+            "position_limit_pct": config.ALERT_POSITION_LIMIT_PCT,
+            "funding_rate_extreme": config.ALERT_FUNDING_RATE_EXTREME,
         }
-        self._last_regime: str | None = None
+        self._last_regime: dict[str, str] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -35,13 +39,14 @@ class AlertManager:
 
     async def broadcast(self, alert: dict):
         self.alert_history.append(alert)
-        if len(self.alert_history) > 500:
-            self.alert_history = self.alert_history[-500:]
+        if len(self.alert_history) > config.ALERT_HISTORY_LIMIT:
+            self.alert_history = self.alert_history[-config.ALERT_HISTORY_LIMIT:]
         disconnected = []
         for connection in self.connections:
             try:
                 await connection.send_json(alert)
-            except Exception:
+            except Exception as e:
+                logger.debug("WebSocket send failed, removing connection: %s", e, exc_info=True)
                 disconnected.append(connection)
         for conn in disconnected:
             self.disconnect(conn)
@@ -95,22 +100,25 @@ class AlertManager:
 
         return alerts
 
-    def check_regime(self, regime_data: dict) -> dict | None:
-        """Check for regime change."""
+    def check_regime(self, regime_data: dict, symbol: str = "") -> dict | None:
+        """Check for regime change, tracked per symbol (multi-symbol safe)."""
         current = regime_data.get("regime", "range")
-        if self._last_regime is not None and current != self._last_regime:
+        previous = self._last_regime.get(symbol)
+        if previous is not None and current != previous:
             alert = {
                 "type": "regime_change",
                 "severity": "info",
-                "message": f"Regime changed: {self._last_regime} → {current}",
-                "from": self._last_regime,
+                "message": f"Regime changed: {previous} → {current}",
+                "from": previous,
                 "to": current,
                 "confidence": regime_data.get("confidence", 0),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            self._last_regime = current
+            self._last_regime[symbol] = current
+            if symbol:
+                alert["symbol"] = symbol
             return alert
-        self._last_regime = current
+        self._last_regime[symbol] = current
         return None
 
     def check_drawdown(self, equity_curve: list[dict]) -> dict | None:
@@ -149,6 +157,29 @@ class AlertManager:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         return None
+
+    async def check_and_broadcast(
+        self,
+        symbol: str,
+        features: dict,
+        regime_data: dict,
+        positions: list[dict],
+        capital: float,
+        equity_curve: list[dict] | None = None,
+    ) -> list[dict]:
+        """Run all alert checks for one symbol and broadcast triggered alerts."""
+        alerts = list(self.check_features(features, positions, capital))
+        regime_alert = self.check_regime(regime_data, symbol)
+        if regime_alert:
+            alerts.append(regime_alert)
+        if equity_curve:
+            dd_alert = self.check_drawdown(equity_curve)
+            if dd_alert:
+                alerts.append(dd_alert)
+        for alert in alerts:
+            alert.setdefault("symbol", symbol)
+            await self.broadcast(alert)
+        return alerts
 
 
 manager = AlertManager()

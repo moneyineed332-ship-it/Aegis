@@ -7,8 +7,11 @@ Uses Bollinger Bands z-score for entries with:
 - Sortino/Calmar ratios
 """
 
+import logging
 import math
 from statistics import fmean, stdev
+
+logger = logging.getLogger(__name__)
 
 
 def _bollinger_series(closes: list[float], period: int) -> list[tuple[float, float, float]]:
@@ -37,6 +40,70 @@ def _compute_atr(candles: list[dict], period: int = 14) -> list[float]:
         atr_val = (atr_val * (period - 1) + true_ranges[i]) / period
         atr_series.append(atr_val)
     return atr_series
+
+
+def _compute_adx(candles: list[dict], period: int = 14) -> list[float]:
+    """Compute Average Directional Index (ADX) series."""
+    if len(candles) < period * 2:
+        return [25.0] * len(candles)  # Default neutral ADX
+
+    # Calculate +DM and -DM
+    plus_dm = [0.0]
+    minus_dm = [0.0]
+    for i in range(1, len(candles)):
+        h, l, ph, pl = candles[i]["high"], candles[i]["low"], candles[i-1]["high"], candles[i-1]["low"]
+        up = h - ph
+        down = pl - l
+        plus_dm.append(up if up > down and up > 0 else 0)
+        minus_dm.append(down if down > up and down > 0 else 0)
+
+    # Calculate TR
+    tr = [0.0]
+    for i in range(1, len(candles)):
+        h, l, pc = candles[i]["high"], candles[i]["low"], candles[i-1]["close"]
+        tr.append(max(h - l, abs(h - pc), abs(l - pc)))
+
+    # Smoothed averages (Wilder's smoothing)
+    atr_smooth = [0.0] * period
+    plus_dm_smooth = [0.0] * period
+    minus_dm_smooth = [0.0] * period
+
+    atr_val = fmean(tr[1:period+1])
+    plus_val = fmean(plus_dm[1:period+1])
+    minus_val = fmean(minus_dm[1:period+1])
+
+    atr_smooth.append(atr_val)
+    plus_dm_smooth.append(plus_val)
+    minus_dm_smooth.append(minus_val)
+
+    for i in range(period + 1, len(candles)):
+        atr_val = (atr_val * (period - 1) + tr[i]) / period
+        plus_val = (plus_val * (period - 1) + plus_dm[i]) / period
+        minus_val = (minus_val * (period - 1) + minus_dm[i]) / period
+        atr_smooth.append(atr_val)
+        plus_dm_smooth.append(plus_val)
+        minus_dm_smooth.append(minus_val)
+
+    # Calculate +DI and -DI
+    plus_di = [100 * p / a if a > 0 else 0 for p, a in zip(plus_dm_smooth, atr_smooth)]
+    minus_di = [100 * m / a if a > 0 else 0 for m, a in zip(minus_dm_smooth, atr_smooth)]
+
+    # Calculate DX and ADX
+    dx = []
+    for p, m in zip(plus_di, minus_di):
+        total = p + m
+        dx.append(100 * abs(p - m) / total if total > 0 else 0)
+
+    # ADX = smoothed DX
+    adx_series = [25.0] * period
+    if len(dx) > period:
+        adx_val = fmean(dx[1:period+1])
+        adx_series.append(adx_val)
+        for i in range(period + 1, len(dx)):
+            adx_val = (adx_val * (period - 1) + dx[i]) / period
+            adx_series.append(adx_val)
+
+    return adx_series
 
 
 def _periods_per_year(interval: str) -> int:
@@ -75,6 +142,7 @@ def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
     closes = [c["close"] for c in candles]
     bands = _bollinger_series(closes, period)
     atr_series = _compute_atr(candles)
+    adx_series = _compute_adx(candles)
 
     cash = initial_capital
     quantity = 0.0
@@ -92,9 +160,9 @@ def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
         z_score = (close - mid) / std if std > 0 else 0
 
         # Regime filter: skip in strong trends (ADX > 30)
-        adx = 25  # simplified — real implementation would pass features
+        adx = adx_series[index] if index < len(adx_series) else 25.0
         if use_regime_filter and adx > 30:
-            pass  # Skip trade, market is trending
+            continue  # Skip trade, market is trending
 
         # Update stop loss for long
         if quantity > 0 and use_stop_loss:
@@ -196,7 +264,8 @@ def run_mean_reversion_walk_forward(candles: list[dict], base_parameters: dict, 
         try:
             metrics = run_mean_reversion(train_candles, {**base_parameters, "entry_z_score": entry_z, "exit_z_score": exit_z})
             evaluations.append({"entry_z_score": entry_z, "exit_z_score": exit_z, "train_metrics": metrics})
-        except Exception:
+        except Exception as e:
+            logger.debug("Mean reversion walk-forward candidate failed: entry_z=%s exit_z=%s — %s", entry_z, exit_z, e, exc_info=True)
             continue
     if not evaluations:
         raise ValueError("All candidates failed.")

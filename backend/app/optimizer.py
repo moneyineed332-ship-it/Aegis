@@ -7,7 +7,7 @@ from itertools import product
 
 def optimize_sma(candles: list[dict], capital: float = 10_000) -> dict:
     """Grid search optimization for SMA crossover parameters."""
-    from app.backtesting import run_sma_crossover
+    from .backtesting import run_sma_crossover
 
     fast_range = range(5, 31, 5)  # 5, 10, 15, 20, 25, 30
     slow_range = range(30, 101, 10)  # 30, 40, 50, 60, 70, 80, 90, 100
@@ -59,7 +59,7 @@ def optimize_sma(candles: list[dict], capital: float = 10_000) -> dict:
 
 def optimize_donchian(candles: list[dict], capital: float = 10_000) -> dict:
     """Grid search optimization for Donchian breakout parameters."""
-    from app.backtesting import run_donchian_breakout
+    from .backtesting import run_donchian_breakout
 
     breakout_range = range(10, 61, 5)  # 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60
     exit_range = range(5, 31, 5)  # 5, 10, 15, 20, 25, 30
@@ -109,7 +109,7 @@ def optimize_donchian(candles: list[dict], capital: float = 10_000) -> dict:
 
 def optimize_mean_reversion(candles: list[dict], capital: float = 10_000) -> dict:
     """Grid search optimization for Mean Reversion parameters."""
-    from app.mean_reversion import run_mean_reversion
+    from .mean_reversion import run_mean_reversion
 
     entry_range = [-1.5, -2.0, -2.5, -3.0]
     exit_range = [-0.5, 0.0, 0.5]
@@ -159,7 +159,7 @@ def optimize_mean_reversion(candles: list[dict], capital: float = 10_000) -> dic
 
 def optimize_grid(candles: list[dict], capital: float = 10_000) -> dict:
     """Grid search optimization for Grid trading parameters."""
-    from app.grid import run_grid
+    from .grid import run_grid
 
     count_range = [5, 8, 10, 12, 15, 20]
     spread_range = [0.005, 0.01, 0.015, 0.02, 0.025, 0.03]

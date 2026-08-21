@@ -23,3 +23,33 @@ html {
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 212, 255, 0.2) transparent;
 }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes sectionFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.dashboard-layout {
+  --sidebar-w: 240px;
+}
+
+.dashboard-main {
+  margin-left: 0;
+  transition: margin-left 0.3s ease;
+}
+
+@media (min-width: 1024px) {
+  .dashboard-main {
+    margin-left: var(--sidebar-w, 240px);
+  }
+}

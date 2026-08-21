@@ -4,8 +4,11 @@ Improvements: ATR trailing stops, dynamic position sizing (Kelly-inspired),
 regime filter, Sortino/Calmar ratios, multi-timeframe awareness.
 """
 
+import logging
 import math
 from statistics import fmean, stdev
+
+logger = logging.getLogger(__name__)
 
 
 def _compute_atr(candles: list[dict], period: int = 14) -> list[float]:
@@ -172,7 +175,8 @@ def run_walk_forward(candles: list[dict], base_parameters: dict, candidates: lis
         try:
             metrics = run_sma_crossover(train_candles, {**base_parameters, "fast_period": fast, "slow_period": slow})
             evaluations.append({"fast_period": fast, "slow_period": slow, "train_metrics": metrics})
-        except Exception:
+        except Exception as e:
+            logger.debug("SMA walk-forward candidate failed: %s/%s — %s", fast, slow, e, exc_info=True)
             continue
     if not evaluations:
         raise ValueError("All candidate parameter sets failed.")
@@ -285,10 +289,57 @@ def run_donchian_walk_forward(candles: list[dict], base_parameters: dict, candid
         try:
             metrics = run_donchian_breakout(train, {**base_parameters, "breakout_period": bp, "exit_period": ep})
             evaluations.append({"breakout_period": bp, "exit_period": ep, "train_metrics": metrics})
-        except Exception:
+        except Exception as e:
+            logger.debug("Donchian walk-forward candidate failed: %s/%s — %s", bp, ep, e, exc_info=True)
             continue
     if not evaluations:
         raise ValueError("All candidates failed.")
     winner = max(evaluations, key=lambda e: e["train_metrics"]["sharpe_ratio"])
     oos = run_donchian_breakout(test, {**base_parameters, **winner})
     return {"selected_parameters": {"breakout_period": winner["breakout_period"], "exit_period": winner["exit_period"]}, "train_metrics": winner["train_metrics"], "out_of_sample_metrics": oos, "candidates": evaluations}
+
+
+def donchian_live_signal(candles: list[dict], breakout_period: int = 20, exit_period: int = 10) -> dict:
+    """Live Donchian breakout signal for the ONE focused strategy.
+
+    Uses the same rules as the backtest (price breaking above the channel):
+      - buy  when close > highest high of the last N candles
+      - sell when close < lowest low of the last M candles (exit)
+    Returns a dict with action + levels; matches backtest behavior so what is
+    backtested is what is traded.
+    """
+    if len(candles) <= max(breakout_period, exit_period):
+        return {"action": "hold", "confidence": 0.5, "reason": "Not enough candles for Donchian signal."}
+
+    last = candles[-1]
+    prev = candles[-(breakout_period + 1):-1]
+    close = last["close"]
+    channel_high = max(c["high"] for c in prev)
+    channel_low = min(c["low"] for c in prev)
+    vol = (channel_high - channel_low) / close if close > 0 else 0
+
+    if close > channel_high:
+        return {
+            "action": "buy",
+            "confidence": min(0.9, 0.6 + vol),
+            "channel_high": round(channel_high, 6),
+            "reason": f"Breakout above {channel_high:.2f} (vol {vol:.2%}).",
+        }
+    if close < channel_low:
+        return {
+            "action": "sell",
+            "confidence": min(0.9, 0.6 + vol),
+            "channel_low": round(channel_low, 6),
+            "reason": f"Drop below {channel_low:.2f} — exit position.",
+        }
+    return {
+        "action": "hold",
+        "confidence": 0.5,
+        "channel_high": round(channel_high, 3),
+        "channel_low": round(channel_low, 3),
+        "reason": "Price inside the Donchian channel; no breakout.",
+    }
+
+
+# SMC/ICT + Multi-Timeframe backtests delegated to backtesting_smc module
+from .backtesting_smc import run_smc_ict, run_multi_timeframe, run_multi_scale_crossover, run_smc_ict_walk_forward, run_multi_timeframe_walk_forward  # noqa: E402, F401

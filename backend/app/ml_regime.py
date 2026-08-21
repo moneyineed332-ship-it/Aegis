@@ -7,9 +7,12 @@ No sklearn dependency — implements logistic regression from scratch with:
 - More features (ADX, Stochastic RSI, VWAP)
 """
 
+import json
 import math
 import random
 from statistics import fmean, stdev
+
+from . import storage as _storage
 
 
 LABELS = ["bull_trend", "bear_trend", "range", "high_volatility", "low_volatility", "capitulation", "euphoria"]
@@ -96,6 +99,42 @@ class SimpleClassifier:
                     self.biases[c] += self.lr * m_hat_b / (math.sqrt(v_hat_b) + eps)
         self._fitted = True
 
+    def to_dict(self) -> dict:
+        """Serialize model to a JSON-safe dict."""
+        return {
+            "weights": self.weights,
+            "biases": self.biases,
+            "lr": self.lr,
+            "l2_lambda": self.l2_lambda,
+            "n_features": self.n_features,
+            "n_classes": self.n_classes,
+            "_fitted": self._fitted,
+            "_m_w": self._m_w,
+            "_v_w": self._v_w,
+            "_m_b": self._m_b,
+            "_v_b": self._v_b,
+            "_t": self._t,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SimpleClassifier":
+        """Restore model from serialized dict."""
+        model = cls(
+            n_features=data["n_features"],
+            n_classes=data["n_classes"],
+            learning_rate=data.get("lr", 0.01),
+            l2_lambda=data.get("l2_lambda", 0.01),
+        )
+        model.weights = data["weights"]
+        model.biases = data["biases"]
+        model._fitted = data.get("_fitted", False)
+        model._m_w = data.get("_m_w", [[0.0] * data["n_features"] for _ in range(data["n_classes"])])
+        model._v_w = data.get("_v_w", [[0.0] * data["n_features"] for _ in range(data["n_classes"])])
+        model._m_b = data.get("_m_b", [0.0] * data["n_classes"])
+        model._v_b = data.get("_v_b", [0.0] * data["n_classes"])
+        model._t = data.get("_t", 0)
+        return model
+
 
 class RegimePredictor:
     """ML-based regime prediction with feature importance, train/test metrics."""
@@ -160,6 +199,7 @@ class RegimePredictor:
 
         self._compute_importance()
         self._trained = True
+        self.save_model()
 
         return {
             "status": "trained",
@@ -284,6 +324,32 @@ class RegimePredictor:
             "classes": LABELS,
             "metrics": self._metrics,
         }
+
+    def save_model(self, model_id: str = "regime_predictor") -> None:
+        """Persist model state to DB."""
+        if not self._trained or not self.model:
+            return
+        data = {
+            "model": self.model.to_dict(),
+            "importance": self._importance,
+            "trained": self._trained,
+            "metrics": self._metrics,
+        }
+        _storage.save_ml_model(model_id, data)
+
+    def load_model(self, model_id: str = "regime_predictor") -> bool:
+        """Restore model state from DB. Returns True if restored."""
+        data = _storage.load_ml_model(model_id)
+        if not data:
+            return False
+        try:
+            self.model = SimpleClassifier.from_dict(data["model"])
+            self._importance = data.get("importance", {})
+            self._trained = data.get("trained", False)
+            self._metrics = data.get("metrics", {})
+            return self._trained
+        except (KeyError, TypeError):
+            return False
 
 
 predictor = RegimePredictor()

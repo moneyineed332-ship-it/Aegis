@@ -1,236 +1,243 @@
-"""Gemini AI Analyst — provides AI reasoning for all AEGIS modules."""
+"""AI Analyst — OpenCode Zen primary, OpenRouter fallback, provides AI reasoning for all AEGIS modules."""
 
 import json
-import os
 import threading
-import urllib.request
-import urllib.error
 from typing import Any
 
-GEMINI_API_KEYS: list[str] = []
-for key_env in [
-    "GEMINI_API_KEY_1",
-    "GEMINI_API_KEY_2",
-    "GEMINI_API_KEY_3",
-    "GEMINI_API_KEY_4",
-]:
-    k = os.getenv(key_env, "")
-    if k:
-        GEMINI_API_KEYS.append(k)
+import httpx
 
-if not GEMINI_API_KEYS:
-    single = os.getenv("GEMINI_API_KEY", "")
-    if single:
-        GEMINI_API_KEYS.append(single)
+from . import config
 
-_key_index = 0
-_key_lock = threading.Lock()
+OPENCODE_API_KEY = config.OPENCODE_API_KEY
+OPENROUTER_API_KEY = config.OPENROUTER_API_KEY
+
+_call_lock = threading.Semaphore(3)  # Allow up to 3 concurrent AI calls
+
+# Shared httpx client for AI calls
+_http_client: httpx.Client | None = None
 
 
-def _next_key() -> str:
-    global _key_index
-    if not GEMINI_API_KEYS:
-        return ""
-    with _key_lock:
-        key = GEMINI_API_KEYS[_key_index % len(GEMINI_API_KEYS)]
-        _key_index += 1
-    return key
+def _get_http_client() -> httpx.Client:
+    """Get or create a shared httpx client."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.Client(timeout=config.AI_TIMEOUT)
+    return _http_client
+
+SYSTEM_INSTRUCTION = """Tu es un analyste quantitatif senior specialise en trading crypto avec expertise dans TOUS les styles de trading:
+
+**SCALPING (ultra-court terme, 1m-5m):**
+- Strategie: EMA(3)/EMA(8) crossover rapide, confirmation RSI(3) + Stochastic(5,3,3)
+- Regles: Entrer sur croisement EMA rapide + RSI < 30 (oversold) ou > 70 (overbought)
+- Stop: ATR(14) x 1.5, Take Profit: ATR(14) x 2.25 (ratio TP/SL = 1.5)
+- Max trades/jour: 20, allocation par trade: 5% du capital
+
+**SWING TRADING (moyen terme, 4h-1d):**
+- Strategie: MACD(12,26,9) histogramme croise + Fibonacci 0.382 retracement
+- Regles: Entrer sur pullback vers Fibo 38.2% avec MACD bull cross
+- Stop: ATR(14) x 3.0, Trail: ATR(14) x 2.5
+- Allocation: 15% du capital, positions tenues 2-14 jours
+
+**INTRADAY (sessions, 15m-1h):**
+- Strategie: VWAP direction + RSI(14) momentum + EMA(9/21) trend
+- Regles: Long au-dessus VWAP si EMA9>EMA21 et RSI>55, Short en dessous VWAP
+- Stop: ATR(14) x 1.5, Fermer toutes les positions avant fin de session
+- Allocation: 10% du capital, allow shorts: oui
+
+**TREND FOLLOWING (long terme):**
+- SMA(50)/SMA(200) golden/death cross, Donchian breakout
+- Allocation: 20% du capital, trailing stop ATR(20) x 3.0
+
+**MEAN REVERSION (range-bound):**
+- Bollinger Bands(20,2) z-score, retour a la moyenne
+- Stop: 2x ATR(14), TP: 1x ATR(14)
+
+**GRID TRADING (range-bound, accumulation):**
+- Grille adaptative ATR, niveaux = ATR(14) x 0.5
+- Allocation: 30% du capital, max 20 ordres
+
+Tu dois repondre UNIQUEMENT en JSON valide avec les champs demandes. Pas de texte avant ou apres le JSON."""
 
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+def _call_opencode(prompt: str) -> dict[str, Any]:
+    """Call OpenCode Zen API."""
+    if not OPENCODE_API_KEY:
+        return {"error": "No OpenCode API key configured", "ai_available": False}
 
-SYSTEM_INSTRUCTION = """Tu es un analyste quantitatif senior spécialisé en trading crypto.
-Tu Analyses les données de marché fournies et fournis:
-1. Évaluation du régime de marché (tendance/horizontal/volatil)
-2. Évaluation du risque (échelle 1-10 avec justification)
-3. Recommandation de stratégie (niveaux d'entrée/sortie, taille de position)
-4. Niveaux clés de support/résistance
-5. Évaluation du sentiment basée sur les indicateurs disponibles
-
-Réponds TOUJOURS en JSON structuré. Sois conservateur avec les recommandations.
-Inclus les niveaux de confiance. Réponds en français."""
-
-TOOL_SCHEMAS = {
-    "market_analysis": {
-        "name": "market_analysis",
-        "description": "Analyse complète du marché crypto",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "regime": {"type": "string", "description": "bull_trend, bear_trend, range, high_volatility, low_volatility, capitulation, euphoria"},
-                "risk_score": {"type": "integer", "description": "1-10"},
-                "risk_justification": {"type": "string"},
-                "strategy": {"type": "string", "description": "Recommandation de stratégie"},
-                "entry_level": {"type": "number"},
-                "exit_level": {"type": "number"},
-                "stop_loss": {"type": "number"},
-                "position_size_pct": {"type": "number", "description": "Pourcentage du capital"},
-                "support_levels": {"type": "array", "items": {"type": "number"}},
-                "resistance_levels": {"type": "array", "items": {"type": "number"}},
-                "sentiment": {"type": "string", "description": "bearish, neutral, bullish"},
-                "confidence": {"type": "number", "description": "0-1"},
-                "reasoning": {"type": "string"},
-            },
-            "required": ["regime", "risk_score", "strategy", "confidence", "reasoning"],
-        },
-    },
-    "risk_assessment": {
-        "name": "risk_assessment",
-        "description": "Évaluation détaillée des risques",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "overall_risk": {"type": "integer", "description": "1-10"},
-                "var_analysis": {"type": "string"},
-                "drawdown_risk": {"type": "string"},
-                "correlation_risk": {"type": "string"},
-                "liquidity_risk": {"type": "string"},
-                "recommendation": {"type": "string"},
-                "max_position_pct": {"type": "number"},
-                "hedging_suggestion": {"type": "string"},
-            },
-            "required": ["overall_risk", "recommendation"],
-        },
-    },
-    "strategy_review": {
-        "name": "strategy_review",
-        "description": "Revue et optimisation des stratégies",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "best_strategy": {"type": "string"},
-                "improvements": {"type": "array", "items": {"type": "string"}},
-                "parameter_adjustments": {"type": "object"},
-                "expected_impact": {"type": "string"},
-                "confidence": {"type": "number"},
-            },
-            "required": ["best_strategy", "confidence"],
-        },
-    },
-    "sentiment_analysis": {
-        "name": "sentiment_analysis",
-        "description": "Analyse de sentiment basée sur les données de marché",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "overall_sentiment": {"type": "string", "description": "very_bearish, bearish, neutral, bullish, very_bullish"},
-                "fear_greed_interpretation": {"type": "string"},
-                "volume_analysis": {"type": "string"},
-                "momentum_analysis": {"type": "string"},
-                "onchain_analysis": {"type": "string"},
-                "news_impact": {"type": "string"},
-                "confidence": {"type": "number"},
-            },
-            "required": ["overall_sentiment", "confidence"],
-        },
-    },
-}
-
-
-def _call_gemini(prompt: str, tool_name: str | None = None) -> dict[str, Any]:
-    api_key = _next_key()
-    if not api_key:
-        return {"error": "No Gemini API key configured", "ai_available": False}
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}"
+    url = f"{config.OPENCODE_BASE_URL}/chat/completions"
 
     payload: dict[str, Any] = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
-        "generationConfig": {
-            "temperature": 0.3,
-            "maxOutputTokens": 2048,
-            "responseMimeType": "application/json",
-        },
+        "model": config.OPENCODE_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_INSTRUCTION},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": config.OPENCODE_TEMPERATURE,
+        "max_tokens": config.OPENCODE_MAX_TOKENS,
     }
 
-    if tool_name and tool_name in TOOL_SCHEMAS:
-        payload["tools"] = [{"functionDeclarations": [TOOL_SCHEMAS[tool_name]]}]
-
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-
+    client = _get_http_client()
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
+        response = client.post(url, json=payload, headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {OPENCODE_API_KEY}",
+            "User-Agent": "AEGIS-AI/1.0",
+        })
+        response.raise_for_status()
+        result = response.json()
 
-        candidates = result.get("candidates", [])
-        if not candidates:
-            return {"error": "No response from Gemini", "raw": result}
+        choices = result.get("choices", [])
+        if not choices:
+            return {"error": "No response from OpenCode", "raw": result}
 
-        content = candidates[0].get("content", {})
-        parts = content.get("parts", [])
+        content = choices[0].get("message", {}).get("content")
+        if content:
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                return {"text_response": content}
 
-        for part in parts:
-            if "functionCall" in part:
-                return part["functionCall"].get("args", {})
-            if "text" in part:
-                try:
-                    return json.loads(part["text"])
-                except json.JSONDecodeError:
-                    return {"text_response": part["text"]}
+        return {"error": "Empty OpenCode response"}
 
-        return {"error": "Empty response"}
-
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        return {"error": f"Gemini API error {e.code}", "detail": body[:500]}
+    except httpx.HTTPStatusError as e:
+        body = e.response.text[:500]
+        if e.response.status_code == 429:
+            return {"error": "OpenCode quota exceeded", "ai_available": False, "detail": body[:300]}
+        if e.response.status_code == 403:
+            return {"error": "OpenCode rate limited", "ai_available": False, "detail": body[:300]}
+        return {"error": f"OpenCode API error {e.response.status_code}", "detail": body[:500]}
     except Exception as e:
         return {"error": str(e)}
 
 
-def analyze_market(candles: list[dict], features: dict, risk_data: dict, regime: dict) -> dict:
-    prompt = f"""Analyse ce marché crypto:
+def _call_openrouter(prompt: str) -> dict[str, Any]:
+    """Call OpenRouter API (OpenAI-compatible) as fallback."""
+    if not OPENROUTER_API_KEY:
+        return {"error": "No OpenRouter API key configured", "ai_available": False}
 
-CANDLES RÉCENTES (20 dernières):
+    url = f"{config.OPENROUTER_BASE_URL}/chat/completions"
+
+    payload: dict[str, Any] = {
+        "model": config.OPENROUTER_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_INSTRUCTION},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": config.OPENROUTER_TEMPERATURE,
+        "max_tokens": config.OPENROUTER_MAX_TOKENS,
+    }
+
+    client = _get_http_client()
+    try:
+        response = client.post(url, json=payload, headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "HTTP-Referer": "https://aegis-ai.local",
+            "X-Title": "AEGIS AI Quant",
+        })
+        response.raise_for_status()
+        result = response.json()
+
+        choices = result.get("choices", [])
+        if not choices:
+            return {"error": "No response from OpenRouter", "raw": result}
+
+        content = choices[0].get("message", {}).get("content")
+        if content:
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                return {"text_response": content}
+
+        return {"error": "Empty OpenRouter response"}
+
+    except httpx.HTTPStatusError as e:
+        body = e.response.text[:500]
+        if e.response.status_code == 429:
+            return {"error": "OpenRouter quota exceeded", "ai_available": False, "detail": body[:300]}
+        return {"error": f"OpenRouter API error {e.response.status_code}", "detail": body[:500]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _call_ai(prompt: str) -> dict[str, Any]:
+    """Try OpenCode first, then OpenRouter as fallback."""
+    with _call_lock:
+        result = _call_opencode(prompt)
+        if result.get("ai_available") is False and OPENROUTER_API_KEY:
+            result = _call_openrouter(prompt)
+        return result
+
+
+def analyze_market(candles: list[dict], features: dict, risk_data: dict, regime: dict) -> dict:
+    prompt = f"""Analyse ce marche crypto et recommande le meilleur style de trading:
+
+STYLES DISPONIBLES:
+- SCALPING: Court terme (1m-5m), EMA(3/8) + RSI(3) + Stoch(5,3,3), stops serrés ATRx1.5
+- SWING: Moyen terme (4h-1d), MACD(12,26,9) + Fibonacci 38.2% + ATR trailing
+- INTRADAY: Sessions (15m-1h), VWAP + RSI(14) + EMA(9/21), fermeture en fin de session
+- TREND FOLLOWING: SMA/Donchian, long terme
+- MEAN REVERSION: Bollinger, range-bound
+- GRID: Range-bound, accumulation
+
+CANDLES RECENTES (20 dernieres):
 {json.dumps(candles[-20:], indent=2)}
 
 INDICATEURS TECHNIQUES:
 {json.dumps(features, indent=2)}
 
-MÉTRIQUES DE RISQUE:
+METRIQUES DE RISQUE:
 {json.dumps(risk_data, indent=2)}
 
-RÉGIME DÉTECTÉ:
+REGIME DETECTE:
 {json.dumps(regime, indent=2)}
 
-Fournis ton analyse complète en JSON."""
-    return _call_gemini(prompt, "market_analysis")
+Fournis ton analyse complete en JSON avec le style de trading recommande."""
+    return _call_ai(prompt)
 
 
 def assess_risk(candles: list[dict], risk_data: dict, positions: list[dict]) -> dict:
-    prompt = f"""Évalue les risques de ce portefeuille:
+    prompt = f"""Evalue les risques de ce portefeuille:
 
 POSITIONS ACTUELLES:
 {json.dumps(positions, indent=2)}
 
-MÉTRIQUES DE RISQUE:
+METRIQUES DE RISQUE:
 {json.dumps(risk_data, indent=2)}
 
-HISTORIQUE (10 dernières candles):
+HISTORIQUE (10 dernieres candles):
 {json.dumps(candles[-10:], indent=2)}
 
-Fournis une évaluation détaillée des risques en JSON."""
-    return _call_gemini(prompt, "risk_assessment")
+Fournis une evaluation detaillee des risques en JSON."""
+    return _call_ai(prompt)
 
 
 def review_strategies(backtests: list[dict], optimizer_results: dict) -> dict:
-    prompt = f"""Analyse les résultats de backtest et optimisation:
+    prompt = f"""Analyse les resultats de backtest et optimisation des strategies crypto:
+
+STRATEGIES DISPONIBLES:
+- SMA Crossover: Trend following, bon en marche trending
+- Donchian Breakout: Breakout, capture gros mouvements
+- Mean Reversion Bollinger: Range-bound, mean reversion
+- Grid Adaptatif: Range-bound, accumulation progressive
+- SCALPING EMA/RSI/Stoch: Ultra-court terme, haute frequence, stops serres
+- SWING MACD/Fibonacci: Moyen terme, Fibonacci retracement, trailing stops
+- INTRADAY VWAP/RSI: Sessions, VWAP direction, fermeture daily
 
 BACKTESTS:
 {json.dumps(backtests[:10], indent=2)}
 
-RÉSULTATS OPTIMIZER:
+RESULTATS OPTIMIZER:
 {json.dumps(optimizer_results, indent=2)}
 
-Recommande la meilleure stratégie et les améliorations possibles en JSON."""
-    return _call_gemini(prompt, "strategy_review")
+Recommande le meilleur style de trading pour les conditions actuelles et les ameliorations possibles en JSON."""
+    return _call_ai(prompt)
 
 
 def analyze_sentiment(market_data: dict, fear_greed: dict, funding_rates: dict) -> dict:
-    prompt = f"""Analyse le sentiment du marché crypto:
+    prompt = f"""Analyse le sentiment du marche crypto:
 
-DONNÉES DE MARCHÉ:
+DONNEES DE MARCHE:
 {json.dumps(market_data, indent=2)}
 
 FEAR & GREED INDEX:
@@ -239,14 +246,19 @@ FEAR & GREED INDEX:
 FUNDING RATES:
 {json.dumps(funding_rates, indent=2)}
 
-Évalue le sentiment global du marché en JSON."""
-    return _call_gemini(prompt, "sentiment_analysis")
+Evalue le sentiment global du marche en JSON."""
+    return _call_ai(prompt)
 
 
 def get_status() -> dict:
+    opencode_ok = bool(OPENCODE_API_KEY)
+    openrouter_ok = bool(OPENROUTER_API_KEY)
     return {
-        "available": len(GEMINI_API_KEYS) > 0,
-        "api_keys_count": len(GEMINI_API_KEYS),
-        "model": GEMINI_MODEL,
-        "provider": "Google Gemini",
+        "available": opencode_ok or openrouter_ok,
+        "providers": {
+            "opencode": {"available": opencode_ok, "model": config.OPENCODE_MODEL if opencode_ok else None},
+            "openrouter": {"available": openrouter_ok, "model": config.OPENROUTER_MODEL if openrouter_ok else None},
+        },
+        "provider": "OpenCode Zen + OpenRouter" if openrouter_ok else "OpenCode Zen",
+        "note": "Fallback OpenRouter si OpenCode rate-limite" if openrouter_ok else "OpenCode uniquement",
     }

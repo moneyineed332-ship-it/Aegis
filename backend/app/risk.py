@@ -1,10 +1,141 @@
-"""Advanced risk metrics: VaR/CVaR, stress tests, correlation, concentration."""
+"""Advanced risk metrics: VaR/CVaR, stress tests, correlation, concentration, circuit breaker."""
 
 import math
+from datetime import datetime, timezone
 from statistics import fmean, stdev
 
+from . import storage as _storage
 
 _PERIODS_PER_YEAR = {"5m": 105_120, "15m": 35_040, "1h": 8_760, "4h": 2_190, "1d": 365}
+
+# --- Circuit Breaker State ---
+_circuit_breaker = {
+    "halted": False,
+    "reason": None,
+    "halted_at": None,
+    "daily_pnl": 0.0,
+    "consecutive_losses": 0,
+    "trade_history": [],
+}
+
+CIRCUIT_BREAKER_DAILY_LOSS_PCT = 0.03  # 3% daily loss threshold
+CIRCUIT_BREAKER_CONSECUTIVE_LOSSES = 3  # 3 consecutive losses
+CIRCUIT_BREAKER_COOLDOWN_HOURS = 24  # 24h cooldown after halt
+
+
+def _persist_circuit_breaker() -> None:
+    """Save circuit breaker state to DB (best-effort)."""
+    try:
+        _storage.save_circuit_breaker_state(_circuit_breaker)
+    except Exception:
+        pass  # Don't break trading if DB write fails
+
+
+def restore_circuit_breaker() -> None:
+    """Restore circuit breaker state from DB on engine startup."""
+    saved = _storage.load_circuit_breaker_state()
+    if saved is not None:
+        _circuit_breaker["halted"] = saved.get("halted", False)
+        _circuit_breaker["reason"] = saved.get("reason")
+        _circuit_breaker["halted_at"] = saved.get("halted_at")
+        _circuit_breaker["daily_pnl"] = saved.get("daily_pnl", 0.0)
+        _circuit_breaker["consecutive_losses"] = saved.get("consecutive_losses", 0)
+
+
+def check_circuit_breaker(initial_capital: float, current_equity: float, daily_start_equity: float | None = None) -> dict:
+    """Check if circuit breaker should trigger. Returns status dict.
+
+    Uses daily_start_equity if provided (tracks daily PnL properly),
+    otherwise falls back to initial_capital.
+    """
+    now = datetime.now(timezone.utc)
+    reference = daily_start_equity if daily_start_equity is not None else initial_capital
+
+    # Reset daily PnL if new day
+    if _circuit_breaker["halted_at"]:
+        hours_since_halt = (now - _circuit_breaker["halted_at"]).total_seconds() / 3600
+        if hours_since_halt >= CIRCUIT_BREAKER_COOLDOWN_HOURS:
+            _circuit_breaker["halted"] = False
+            _circuit_breaker["reason"] = None
+            _circuit_breaker["halted_at"] = None
+            _circuit_breaker["daily_pnl"] = 0.0
+            _circuit_breaker["consecutive_losses"] = 0
+
+    if _circuit_breaker["halted"]:
+        return {
+            "halted": True,
+            "reason": _circuit_breaker["reason"],
+            "halted_at": _circuit_breaker["halted_at"].isoformat() if _circuit_breaker["halted_at"] else None,
+        }
+
+    # Check daily loss threshold
+    daily_loss_pct = (reference - current_equity) / reference if reference > 0 else 0
+    _circuit_breaker["daily_pnl"] = current_equity - reference
+
+    if daily_loss_pct >= CIRCUIT_BREAKER_DAILY_LOSS_PCT:
+        _circuit_breaker["halted"] = True
+        _circuit_breaker["reason"] = f"Daily loss {daily_loss_pct*100:.1f}% exceeds {CIRCUIT_BREAKER_DAILY_LOSS_PCT*100:.0f}% threshold"
+        _circuit_breaker["halted_at"] = now
+        _persist_circuit_breaker()
+        return {
+            "halted": True,
+            "reason": _circuit_breaker["reason"],
+            "halted_at": now.isoformat(),
+        }
+
+    # Check consecutive losses
+    if _circuit_breaker["consecutive_losses"] >= CIRCUIT_BREAKER_CONSECUTIVE_LOSSES:
+        _circuit_breaker["halted"] = True
+        _circuit_breaker["reason"] = f"{_circuit_breaker['consecutive_losses']} consecutive losses"
+        _circuit_breaker["halted_at"] = now
+        _persist_circuit_breaker()
+        return {
+            "halted": True,
+            "reason": _circuit_breaker["reason"],
+            "halted_at": now.isoformat(),
+        }
+
+    return {"halted": False, "reason": None, "halted_at": None}
+
+
+def record_trade_result(pnl: float) -> None:
+    """Record trade result for circuit breaker tracking."""
+    _circuit_breaker["trade_history"].append(pnl)
+    # Cap history to last 1000 entries to prevent memory leak
+    if len(_circuit_breaker["trade_history"]) > 1000:
+        _circuit_breaker["trade_history"] = _circuit_breaker["trade_history"][-1000:]
+    if pnl < 0:
+        _circuit_breaker["consecutive_losses"] += 1
+    else:
+        _circuit_breaker["consecutive_losses"] = 0
+    _persist_circuit_breaker()
+
+
+def get_circuit_breaker_status() -> dict:
+    """Get current circuit breaker status."""
+    return {
+        "halted": _circuit_breaker["halted"],
+        "reason": _circuit_breaker["reason"],
+        "halted_at": _circuit_breaker["halted_at"].isoformat() if _circuit_breaker["halted_at"] else None,
+        "daily_pnl": round(_circuit_breaker["daily_pnl"], 2),
+        "consecutive_losses": _circuit_breaker["consecutive_losses"],
+        "thresholds": {
+            "daily_loss_pct": CIRCUIT_BREAKER_DAILY_LOSS_PCT * 100,
+            "consecutive_losses": CIRCUIT_BREAKER_CONSECUTIVE_LOSSES,
+            "cooldown_hours": CIRCUIT_BREAKER_COOLDOWN_HOURS,
+        },
+    }
+
+
+def reset_circuit_breaker() -> None:
+    """Manually reset circuit breaker."""
+    _circuit_breaker["halted"] = False
+    _circuit_breaker["reason"] = None
+    _circuit_breaker["halted_at"] = None
+    _circuit_breaker["daily_pnl"] = 0.0
+    _circuit_breaker["consecutive_losses"] = 0
+    _circuit_breaker["trade_history"] = []
+    _persist_circuit_breaker()
 
 
 def historical_risk(candles: list[dict], capital: float, confidence: float = 0.95, interval: str = "1h") -> dict:
@@ -176,6 +307,19 @@ def correlation_matrix(assets: dict[str, list[float]]) -> dict:
     }
 
 
+def _interpret_correlation(avg_corr: float | None) -> str:
+    """Human-readable interpretation of average correlation."""
+    if avg_corr is None:
+        return "Insufficient data"
+    if avg_corr > 0.7:
+        return "High correlation — limited diversification benefit"
+    if avg_corr > 0.3:
+        return "Moderate correlation — some diversification benefit"
+    if avg_corr > 0:
+        return "Low correlation — good diversification"
+    return "Negative correlation — excellent diversification"
+
+
 def _pearson_correlation(x: list[float], y: list[float]) -> float:
     """Pearson correlation coefficient."""
     if len(x) < 2 or len(y) < 2:
@@ -194,7 +338,7 @@ def _pearson_correlation(x: list[float], y: list[float]) -> float:
 def concentration_risk(positions: list[dict], prices: dict[str, float]) -> dict:
     """Calculate concentration risk from open positions."""
     if not positions:
-        return {"total_exposure": 0, "herfindahl": 0, "max_concentration": 0, "positions": []}
+        return {"total_exposure": 0, "herfindahl": 0, "max_concentration": 0, "position_count": 0, "positions": []}
 
     position_values = []
     for pos in positions:
@@ -204,7 +348,7 @@ def concentration_risk(positions: list[dict], prices: dict[str, float]) -> dict:
 
     total = sum(p["value"] for p in position_values)
     if total == 0:
-        return {"total_exposure": 0, "herfindahl": 0, "max_concentration": 0, "positions": []}
+        return {"total_exposure": 0, "herfindahl": 0, "max_concentration": 0, "position_count": 0, "positions": []}
 
     # Herfindahl-Hirschman Index (0 = perfect diversification, 1 = full concentration)
     weights = [p["value"] / total for p in position_values]

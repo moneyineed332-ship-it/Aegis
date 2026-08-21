@@ -7,8 +7,11 @@ Improvements:
 - Sortino/Calmar ratios
 """
 
+import logging
 import math
 from statistics import fmean, stdev
+
+logger = logging.getLogger(__name__)
 
 
 def _compute_atr(candles: list[dict], period: int = 14) -> list[float]:
@@ -183,7 +186,8 @@ def run_grid_walk_forward(candles: list[dict], base_parameters: dict, candidates
         try:
             metrics = run_grid(train_candles, {**base_parameters, "grid_count": gc, "grid_spread_pct": gs})
             evaluations.append({"grid_count": gc, "grid_spread_pct": gs, "train_metrics": metrics})
-        except Exception:
+        except Exception as e:
+            logger.debug("Grid walk-forward candidate failed: gc=%s gs=%s — %s", gc, gs, e, exc_info=True)
             continue
     if not evaluations:
         raise ValueError("All candidates failed.")
