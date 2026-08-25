@@ -9,7 +9,11 @@ Focused mode (Phase 1): when aegis is reduced to a single trade type,
 every regime maps to the configured focused strategy (Donchian Breakout).
 """
 
+import logging
+
 from . import config, learning, strategy_registry
+
+logger = logging.getLogger(__name__)
 
 
 # Regime → default strategy mapping (fallback when no learning data)
@@ -137,10 +141,8 @@ def _select_strategy(regime: str) -> str | None:
                 return best["strategy_id"]
             if best["regime_score"] > 50:
                 return best["strategy_id"]
-    except Exception:
-        pass
-
-    # Fall back to default mapping
+    except Exception as exc:
+        logger.debug("Learning ranking failed, using default: %s", exc)
     return DEFAULT_STRATEGY_MAP.get(regime)
 
 
@@ -155,11 +157,10 @@ def _build_reason(regime: str, strategy: str) -> str:
                 f"win rate: {stats.get('win_rate', 0)*100:.0f}%, "
                 f"PF: {stats.get('profit_factor', 0):.1f})"
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Learning stats failed for %s: %s", strategy, exc)
 
     strategy_names = {
-        "smc_ict": "SMC/ICT Smart Money Concepts",
         "multi_timeframe_confluence": "Multi-Timeframe Confluence",
         "multi_scale_crossover": "Multi-Scale Crossover",
         "donchian_breakout_long_flat": "Donchian Breakout",

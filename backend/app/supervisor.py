@@ -67,9 +67,18 @@ def _check_position_losses() -> list[dict]:
     for p in positions:
         if p["quantity"] == 0:
             continue
-        # Approximate current price from average_price (real price from market_data)
-        loss_pct = 0  # Without current price, we can't compute real-time loss
-        # This is checked more accurately in engine.py monitor_positions
+        symbol = p["symbol"]
+        avg_price = p["average_price"]
+        qty = p["quantity"]
+        notional = abs(qty * avg_price)
+        if notional > config.MAX_ORDER_NOTIONAL:
+            alerts.append({
+                "type": "position_size",
+                "severity": "warning",
+                "symbol": symbol,
+                "pct": round(notional / config.MAX_TOTAL_EXPOSURE * 100, 1),
+                "message": f"Position {symbol} notional ${notional:.2f} exceeds max ${config.MAX_ORDER_NOTIONAL:.0f}",
+            })
     return alerts
 
 

@@ -1,5 +1,6 @@
 """Daily Report — PnL summary, trade log, regime history, performance metrics."""
 
+import json
 import logging
 from datetime import datetime, timezone, timedelta
 from statistics import fmean
@@ -104,7 +105,6 @@ def generate_daily_report(date_str: str | None = None) -> dict:
     for e in regime_events:
         detail = e.get("details") or {}
         if isinstance(detail, str):
-            import json
             try:
                 detail = json.loads(detail)
             except (json.JSONDecodeError, TypeError):

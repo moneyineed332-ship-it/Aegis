@@ -74,7 +74,7 @@ def run_intraday(candles: list[dict], parameters: dict) -> dict:
     interval = parameters.get("interval", "15m")
 
     if len(candles) < max(ema_slow_period, atr_period, rsi_period) + 10:
-        raise ValueError("Pas assez de candles pour intraday (min ~35).")
+        raise ValueError("Not enough candles for intraday (min ~35).")
 
     closes = [c["close"] for c in candles]
     vwap_vals = _vwap(candles)
@@ -188,7 +188,7 @@ def run_intraday(candles: list[dict], parameters: dict) -> dict:
         equity_curve.append(equity)
 
     if not equity_curve:
-        raise ValueError("Pas de données suffisantes.")
+        raise ValueError("Not enough data to compute results.")
 
     final_equity = equity_curve[-1]
     peak, max_drawdown = equity_curve[0], 0.0

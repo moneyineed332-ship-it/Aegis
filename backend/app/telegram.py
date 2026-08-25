@@ -6,7 +6,6 @@ Sends alerts for trades, signals, circuit breaker events, etc.
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 
 import httpx
 

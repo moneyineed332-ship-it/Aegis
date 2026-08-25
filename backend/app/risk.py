@@ -1,10 +1,13 @@
 """Advanced risk metrics: VaR/CVaR, stress tests, correlation, concentration, circuit breaker."""
 
+import logging
 import math
 from datetime import datetime, timezone
 from statistics import fmean, stdev
 
 from . import storage as _storage
+
+logger = logging.getLogger(__name__)
 
 _PERIODS_PER_YEAR = {"5m": 105_120, "15m": 35_040, "1h": 8_760, "4h": 2_190, "1d": 365}
 
@@ -27,8 +30,8 @@ def _persist_circuit_breaker() -> None:
     """Save circuit breaker state to DB (best-effort)."""
     try:
         _storage.save_circuit_breaker_state(_circuit_breaker)
-    except Exception:
-        pass  # Don't break trading if DB write fails
+    except Exception as exc:
+        logger.warning("Failed to persist circuit breaker state: %s", exc)
 
 
 def restore_circuit_breaker() -> None:

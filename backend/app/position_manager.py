@@ -239,7 +239,7 @@ class PositionManager:
         self.position_counter += 1
         position_id = f"pos_{self.position_counter:06d}"
         
-        risk_amount = account_balance * (cfg.risk_per_trade_pct / 100)
+        risk_amount = account_balance * cfg.risk_per_trade_pct
         
         position = Position(
             id=position_id,

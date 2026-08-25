@@ -153,30 +153,6 @@ def _fetch_single_price_fallback(symbol: str, collected_at: str) -> dict | None:
         return None
 
 
-def _fetch_spot_prices_fallback(collected_at: str) -> list[dict]:
-    """Fallback: raw Binance API if CCXT fails (crypto only)."""
-    client = _get_http_client()
-    url = f"{config.BINANCE_SPOT_URL}/ticker/price"
-    snapshots = []
-    # Only fetch crypto symbols in fallback
-    crypto_symbols = [s for s in SYMBOLS if not _is_forex_symbol(s)]
-    
-    for symbol in crypto_symbols:
-        try:
-            response = client.get(url, params={"symbol": symbol})
-            response.raise_for_status()
-            payload = response.json()
-            snapshots.append({
-                "symbol": payload["symbol"],
-                "price": float(payload["price"]),
-                "source": "binance_spot_public",
-                "collected_at": collected_at,
-            })
-        except Exception as e:
-            logger.debug("Fallback price fetch failed for %s: %s", symbol, e, exc_info=True)
-    return snapshots
-
-
 def fetch_ohlcv(symbol: str, interval: str, limit: int, end_time: int | None = None) -> list[dict]:
     """Fetch OHLCV candles via MT5 for Forex, CCXT for crypto."""
     

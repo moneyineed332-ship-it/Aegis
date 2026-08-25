@@ -471,8 +471,13 @@ class ICTSignalGenerator:
             score += 1
 
         # Volatility filter (1 point) — §11: filtre volatilité
-        factors.append(ConfluenceFactor.VOLATILITY)
-        score += 1
+        # Check ATR is within acceptable range for the instrument
+        if candles_m15 and len(candles_m15) >= 14:
+            from .forex_indicators import atr_single
+            current_atr = atr_single(candles_m15, 14)
+            if current_atr is not None and self.cfg.min_atr_pips <= current_atr / self.cfg.pip_value <= self.cfg.max_atr_pips:
+                factors.append(ConfluenceFactor.VOLATILITY)
+                score += 1
 
         return min(score, 10), factors
     

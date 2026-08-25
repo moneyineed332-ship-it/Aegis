@@ -1170,7 +1170,7 @@ def multi_timeframe_confluence(candles_by_tf: dict[str, list[dict]]) -> dict:
         confluence_score = round(bullish_votes / total_votes * 100)
     elif bearish_votes > bullish_votes and bearish_votes >= 2:
         overall = "bearish"
-        confluence_score = round(bearish_votes / total_votes * total_votes * 100 / max(total_votes, 1))
+        confluence_score = round(bearish_votes / total_votes * 100)
     else:
         overall = "neutral"
         confluence_score = 0

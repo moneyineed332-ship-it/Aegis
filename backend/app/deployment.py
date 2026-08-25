@@ -3,9 +3,12 @@
 Pipeline: idea → simulation → backtest → walk_forward → paper_trading → validation → deployment
 """
 
+import logging
 from datetime import datetime, timezone
 
 from . import storage as _storage
+
+logger = logging.getLogger(__name__)
 
 PIPELINE_STAGES = [
     "idea",
@@ -144,8 +147,8 @@ def _persist_pipeline(pipeline: dict) -> None:
     """Save pipeline to DB (best-effort)."""
     try:
         _storage.save_pipeline(pipeline)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to persist pipeline: %s", exc)
 
 
 def restore_pipelines() -> list[dict]:

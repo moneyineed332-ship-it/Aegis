@@ -792,7 +792,7 @@ class IctRiskManager:
         
         return {
             "instrument": instrument,
-            "can_trade": True,  # Sera calculé par check_all_limits
+            "can_trade": False,  # Must be computed via check_all_limits()
             "open_positions": len(open_trades),
             "trades_today": self._trades_today,  # Global pour l'instant
             "limits": {

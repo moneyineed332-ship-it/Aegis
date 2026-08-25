@@ -406,8 +406,8 @@ async def get_dashboard_summary() -> dict:
     positions = await get_active_positions()
 
     return {
-        "capital": capital.dict(),
-        "risk": risk.dict(),
+        "capital": capital.model_dump(),
+        "risk": risk.model_dump(),
         "positions": positions,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

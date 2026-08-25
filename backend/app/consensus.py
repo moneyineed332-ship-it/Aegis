@@ -164,8 +164,10 @@ def add_strategy_vote(strategy_id: str, strategy_name: str, signal: Signal, conf
 
 
 def compute_consensus() -> dict:
-    """Convenience: compute consensus from global engine."""
-    return _engine.compute_consensus()
+    """Convenience: compute consensus from global engine, then clear votes."""
+    result = _engine.compute_consensus()
+    _engine.clear_votes()
+    return result
 
 
 def clear_votes() -> None:

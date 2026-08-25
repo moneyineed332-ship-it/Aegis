@@ -194,7 +194,7 @@ def run_intraday_backtest(req: IntradayBacktestRequest) -> dict:
 
 
 @router.post("/sma-crossover/walk-forward")
-def run_sma_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT", n_splits: int = 3) -> dict:
+def run_sma_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> dict:
     candles = market_data.fetch_ohlcv(symbol, "1h", limit=500)
     if not candles:
         raise HTTPException(status_code=404, detail="No candle data available.")
@@ -207,7 +207,7 @@ def run_sma_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLU
 
 
 @router.post("/donchian-breakout/walk-forward")
-def run_donchian_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT", n_splits: int = 3) -> dict:
+def run_donchian_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> dict:
     candles = market_data.fetch_ohlcv(symbol, "1h", limit=500)
     if not candles:
         raise HTTPException(status_code=404, detail="No candle data available.")
@@ -220,7 +220,7 @@ def run_donchian_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", 
 
 
 @router.post("/mean-reversion/walk-forward")
-def run_mean_reversion_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT", n_splits: int = 3) -> dict:
+def run_mean_reversion_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> dict:
     candles = market_data.fetch_ohlcv(symbol, "1h", limit=500)
     if not candles:
         raise HTTPException(status_code=404, detail="No candle data available.")
@@ -233,7 +233,7 @@ def run_mean_reversion_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHU
 
 
 @router.post("/grid/walk-forward")
-def run_grid_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT", n_splits: int = 3) -> dict:
+def run_grid_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> dict:
     candles = market_data.fetch_ohlcv(symbol, "1h", limit=500)
     if not candles:
         raise HTTPException(status_code=404, detail="No candle data available.")
@@ -279,7 +279,7 @@ def run_multi_scale_crossover_backtest(req: MultiScaleCrossoverBacktestRequest) 
 
 
 @router.post("/smc-ict/walk-forward")
-def run_smc_ict_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT", n_splits: int = 3) -> dict:
+def run_smc_ict_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> dict:
     candles = market_data.fetch_ohlcv(symbol, "1h", limit=500)
     if not candles:
         raise HTTPException(status_code=404, detail="No candle data available.")
@@ -296,7 +296,7 @@ def run_smc_ict_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "
 
 
 @router.post("/multi-timeframe/walk-forward")
-def run_multi_timeframe_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT", n_splits: int = 3) -> dict:
+def run_multi_timeframe_walk_forward(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> dict:
     candles = market_data.fetch_ohlcv(symbol, "1h", limit=500)
     if not candles:
         raise HTTPException(status_code=404, detail="No candle data available.")

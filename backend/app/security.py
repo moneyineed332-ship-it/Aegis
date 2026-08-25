@@ -81,8 +81,8 @@ def _log_event(event_type: str, severity: str, details: dict) -> None:
             details=details,
             severity=severity,
         )
-    except Exception:
-        pass  # Don't fail if logging fails
+    except Exception as exc:
+        logger.warning("Failed to log security event %s: %s", event_type, exc)
 
 
 def get_security_summary(limit: int = 100) -> dict:
