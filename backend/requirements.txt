@@ -1,9 +1,20 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-pydantic==2.13.4
-httpx==0.28.1
-python-dotenv==1.2.2
-websockets==16.1
-ccxt==4.5.65
-slowapi>=0.1.9
-MetaTrader5>=5.0.45
+# AEGIS AI Quant — Backend dependencies
+# Core
+fastapi==0.115.*
+uvicorn[standard]==0.34.*
+httpx==0.28.*
+python-dotenv==1.1.*
+pydantic==2.11.*
+cryptography==44.*
+
+# Exchange
+ccxt==4.4.*
+
+# Data / ML
+numpy==2.2.*
+
+# Supabase (cloud deployment)
+supabase==2.15.*
+
+# Rate limiting
+slowapi==0.1.9.*

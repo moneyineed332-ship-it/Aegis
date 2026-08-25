@@ -1,0 +1,45 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "api/**/*.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "/assets/(.*)",
+      "dest": "/assets/$1"
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ],
+  "env": {
+    "SUPABASE_URL": "@supabase-url",
+    "SUPABASE_ANON_KEY": "@supabase-anon-key",
+    "SUPABASE_SERVICE_KEY": "@supabase-service-key",
+    "AEGIS_MODE": "paper",
+    "AEGIS_FOCUSED_MODE": "true",
+    "AEGIS_FOCUSED_SYMBOLS": "PAXGUSDT,BTCUSDT,ETHUSDT",
+    "AEGIS_ADMIN_TOKEN": "@aegis-admin-token"
+  },
+  "functions": {
+    "api/**/*.py": {
+      "runtime": "@vercel/python@3.1.0",
+      "maxDuration": 30
+    }
+  }
+}

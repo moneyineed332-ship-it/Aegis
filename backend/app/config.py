@@ -39,6 +39,12 @@ ICT_PAPER_CAPITAL = float(os.getenv("AEGIS_ICT_CAPITAL", "50"))  # 50€ pour le
 # --- Database ---
 DB_PATH = os.getenv("AEGIS_DB_PATH", str(Path(__file__).resolve().parent.parent / "data" / "aegis.db"))
 
+# --- Supabase (optional — used for cloud deployment) ---
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_SERVICE_KEY)
+
 # --- Ports ---
 API_HOST = os.getenv("AEGIS_API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("AEGIS_API_PORT", "8000"))
