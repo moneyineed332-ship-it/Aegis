@@ -1,0 +1,34 @@
+# Fly.io configuration for AEGIS AI Quant Engine
+# https://fly.io/docs/reference/configuration/
+
+app = "aegis-ai-engine"
+primary_region = "cdg"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  AEGIS_MODE = "paper"
+  AEGIS_FOCUSED_MODE = "true"
+  AEGIS_FOCUSED_SYMBOLS = "PAXGUSDT,BTCUSDT,ETHUSDT"
+  AEGIS_MAX_POSITIONS = "3"
+  AEGIS_INITIAL_CAPITAL = "20"
+  AEGIS_ICT_CAPITAL = "50"
+  AEGIS_CCXT_TESTNET = "true"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
