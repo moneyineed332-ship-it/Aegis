@@ -64,7 +64,12 @@ FEAR_GREED_URL = config.FEAR_GREED_URL
 FOREX_SYMBOLS = ("EURUSD", "GBPUSD", "XAUUSD")
 
 # Focused mode: price collection restricted to the focused universe.
-SYMBOLS = tuple(config.ICT_SYMBOLS if hasattr(config, 'ICT_SYMBOLS') else (config.FOCUSED_SYMBOLS if config.FOCUSED_MODE else config.SYMBOLS))
+if config.ICT_MODE and hasattr(config, 'ICT_SYMBOLS'):
+    SYMBOLS = tuple(config.ICT_SYMBOLS)
+elif config.FOCUSED_MODE:
+    SYMBOLS = tuple(config.FOCUSED_SYMBOLS)
+else:
+    SYMBOLS = tuple(config.SYMBOLS)
 
 
 def _is_forex_symbol(symbol: str) -> bool:
