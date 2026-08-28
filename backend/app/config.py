@@ -41,8 +41,8 @@ DB_PATH = os.getenv("AEGIS_DB_PATH", str(Path(__file__).resolve().parent.parent 
 
 # --- Supabase (optional — used for cloud deployment) ---
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "") or os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "") or os.getenv("SUPABASE_SECRET_KEY", "")
 USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_SERVICE_KEY)
 
 # --- Ports ---

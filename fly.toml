@@ -1,7 +1,7 @@
 # Fly.io configuration for AEGIS AI Quant Engine
 # https://fly.io/docs/reference/configuration/
 
-app = "aegis-ai-engine"
+app = "aegis-jn6oxq"
 primary_region = "cdg"
 
 [build]
@@ -15,6 +15,8 @@ primary_region = "cdg"
   AEGIS_INITIAL_CAPITAL = "20"
   AEGIS_ICT_CAPITAL = "50"
   AEGIS_CCXT_TESTNET = "true"
+  ENGINE_ENABLED = "true"
+  SUPABASE_URL = "https://xthknzlxseghdscpzssm.supabase.co"
 
 [http_service]
   internal_port = 8000
@@ -23,12 +25,19 @@ primary_region = "cdg"
   auto_start_machines = true
   min_machines_running = 1
 
+  [[http_service.checks]]
+    interval = "10s"
+    timeout = "5s"
+    grace_period = "60s"
+    method = "GET"
+    path = "/health"
+
   [http_service.concurrency]
     type = "connections"
     hard_limit = 25
     soft_limit = 20
 
 [[vm]]
-  memory = "512mb"
+  memory = "1gb"
   cpu_kind = "shared"
   cpus = 1

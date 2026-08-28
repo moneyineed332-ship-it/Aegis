@@ -1,5 +1,6 @@
 """AEGIS MVP API: paper trading and live trading modes."""
 
+import asyncio
 import hmac
 import logging
 import time
@@ -40,13 +41,15 @@ async def lifespan(app: FastAPI):
     if cleaned:
         logger.info("Cleaned %d stale position(s)", cleaned)
 
-    # Start engine if enabled
+    # Start engine if enabled (non-blocking to avoid delaying health checks)
     if config.ENGINE_ENABLED:
-        try:
-            await engine.start_engine()
-            logger.info("Autonomous engine started (ENGINE_ENABLED=true)")
-        except Exception as exc:
-            logger.error("Failed to start engine: %s", exc)
+        async def _start_engine_background():
+            try:
+                await engine.start_engine()
+                logger.info("Autonomous engine started (ENGINE_ENABLED=true)")
+            except Exception as exc:
+                logger.error("Failed to start engine: %s", exc)
+        asyncio.create_task(_start_engine_background())
 
     yield
 
@@ -64,6 +67,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AEGIS AI Quant", version="0.2.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.get("/health")
+async def root_health():
+    """Lightweight health check for Fly.io (no engine dependency)."""
+    return {"status": "ok", "service": "aegis-ai-quant"}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
