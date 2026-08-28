@@ -1,34 +1,37 @@
-# Fly.io configuration for AEGIS AI Quant Engine
-# https://fly.io/docs/reference/configuration/
+# fly.toml app configuration file generated for aegis-jn6oxq on 2026-08-28T12:02:00Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "aegis-ai-engine"
-primary_region = "cdg"
+app = 'aegis-jn6oxq'
+primary_region = 'ams'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  AEGIS_MODE = "paper"
-  AEGIS_FOCUSED_MODE = "true"
-  AEGIS_FOCUSED_SYMBOLS = "PAXGUSDT,BTCUSDT,ETHUSDT"
-  AEGIS_MAX_POSITIONS = "3"
-  AEGIS_INITIAL_CAPITAL = "20"
-  AEGIS_ICT_CAPITAL = "50"
-  AEGIS_CCXT_TESTNET = "true"
+  AEGIS_CCXT_TESTNET = 'true'
+  AEGIS_FOCUSED_MODE = 'true'
+  AEGIS_FOCUSED_SYMBOLS = 'PAXGUSDT,BTCUSDT,ETHUSDT'
+  AEGIS_ICT_CAPITAL = '50'
+  AEGIS_INITIAL_CAPITAL = '20'
+  AEGIS_MAX_POSITIONS = '3'
+  AEGIS_MODE = 'paper'
 
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = false
+  auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
 
   [http_service.concurrency]
-    type = "connections"
+    type = 'connections'
     hard_limit = 25
     soft_limit = 20
 
 [[vm]]
-  memory = "512mb"
-  cpu_kind = "shared"
+  memory = '512mb'
+  cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 512
