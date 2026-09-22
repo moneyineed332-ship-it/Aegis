@@ -515,7 +515,7 @@ class IctRiskManager:
                 # Ne pas augmenter automatiquement le lot après perte
                 if self._consecutive_losses >= 3:
                     self._position_size_locked = True
-                    self._locked_position_size[instrument] = trade.position_size
+                    self._locked_position_size[trade.instrument] = trade.position_size
                     self._current_position_size_multiplier = 0.5  # Réduire de 50%
                     logger.warning(f"Position size verrouillée à {trade.position_size:.2f} lots après 3 pertes consécutives")
             else:

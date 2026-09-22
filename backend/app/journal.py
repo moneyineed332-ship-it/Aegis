@@ -145,8 +145,11 @@ def analyze_decisions(decisions: list[dict], current_prices: dict[str, float]) -
     }
 
 
-def feedback_summary(analyses: list[dict]) -> dict:
-    """Generate a human-readable feedback summary."""
+def feedback_summary(analyses: dict) -> dict:
+    """Generate a human-readable feedback summary.
+
+    Takes the dict returned by analyze_decisions() (not a list).
+    """
     if not analyses:
         return {"message": "No decisions to analyze.", "grade": "N/A", "strengths": [], "weaknesses": []}
 

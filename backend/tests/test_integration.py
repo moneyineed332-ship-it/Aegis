@@ -61,17 +61,17 @@ class TestMarketWorkflow:
 class TestPaperOrderWorkflow:
     """Create paper order -> verify dashboard -> check journal."""
 
-    def test_create_paper_order(self, client):
-        r = client.post("/api/v1/paper-orders", json={"symbol": "BTC/USDT", "side": "buy", "quantity": 0.0002, "reference_price": 50000})
+    def test_create_paper_order(self, client, admin_headers):
+        r = client.post("/api/v1/paper-orders", json={"symbol": "BTC/USDT", "side": "buy", "quantity": 0.0002, "reference_price": 50000}, headers=admin_headers)
         assert r.status_code == 201
         data = r.json()
         assert data["symbol"] == "BTCUSDT"
         assert data["side"] == "buy"
         assert data["status"] in ("filled", "filled_simulated", "partial", "pending")
 
-    def test_paper_order_reflected_in_dashboard(self, client):
+    def test_paper_order_reflected_in_dashboard(self, client, admin_headers):
         # Create order
-        r1 = client.post("/api/v1/paper-orders", json={"symbol": "ETH/USDT", "side": "buy", "quantity": 0.003, "reference_price": 3000})
+        r1 = client.post("/api/v1/paper-orders", json={"symbol": "ETH/USDT", "side": "buy", "quantity": 0.003, "reference_price": 3000}, headers=admin_headers)
         assert r1.status_code == 201
 
         # Dashboard should show the position
@@ -86,14 +86,14 @@ class TestPaperOrderWorkflow:
         client.post("/api/v1/supervisor/emergency-stop", headers=admin_headers)
 
         # Try to create order — should be blocked
-        r = client.post("/api/v1/paper-orders", json={"symbol": "BTC/USDT", "side": "buy", "quantity": 0.0002, "reference_price": 50000})
+        r = client.post("/api/v1/paper-orders", json={"symbol": "BTC/USDT", "side": "buy", "quantity": 0.0002, "reference_price": 50000}, headers=admin_headers)
         assert r.status_code == 423
 
         # Resume
         client.post("/api/v1/supervisor/resume", headers=admin_headers)
 
         # Order should work again
-        r2 = client.post("/api/v1/paper-orders", json={"symbol": "BTC/USDT", "side": "buy", "quantity": 0.0002, "reference_price": 50000})
+        r2 = client.post("/api/v1/paper-orders", json={"symbol": "BTC/USDT", "side": "buy", "quantity": 0.0002, "reference_price": 50000}, headers=admin_headers)
         assert r2.status_code == 201
 
 
@@ -236,7 +236,7 @@ class TestMultiStepWorkflow:
         initial_positions = len(dash1["positions"])
 
         # 2. Create a paper order
-        r1 = client.post("/api/v1/paper-orders", json={"symbol": "SOL/USDT", "side": "buy", "quantity": 0.1, "reference_price": 100})
+        r1 = client.post("/api/v1/paper-orders", json={"symbol": "SOL/USDT", "side": "buy", "quantity": 0.1, "reference_price": 100}, headers=admin_headers)
         assert r1.status_code == 201
 
         # 3. Dashboard should show new position

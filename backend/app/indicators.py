@@ -315,7 +315,8 @@ def stochastic(candles: list[dict], k_period: int = 5, d_period: int = 3) -> tup
             k_vals.append(50.0)
         else:
             k_vals.append((candles[i]["close"] - low_min) / (high_max - low_min) * 100)
-    d_vals = [50.0] * (k_period + d_period - 2)
+    # D[i] = SMA of K[i-d+1..i], aligned with K (same length, same index).
+    d_vals = [50.0] * (d_period - 1)
     for i in range(d_period - 1, len(k_vals)):
         d_vals.append(fmean(k_vals[i - d_period + 1:i + 1]))
     return k_vals, d_vals

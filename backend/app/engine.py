@@ -911,9 +911,9 @@ async def task_check_trailing_stops():
 async def task_check_circuit_breaker():
     """Check if circuit breaker should be triggered."""
     try:
-        positions = storage.list_positions()
+        from . import supervisor
         capital = config.PAPER_CAPITAL
-        equity = capital + sum(p["quantity"] * p["average_price"] for p in positions)
+        equity = supervisor.portfolio_equity(capital)
 
         result = risk.check_circuit_breaker(capital, equity)
         if result.get("halted") and not storage.get_kill_switch():

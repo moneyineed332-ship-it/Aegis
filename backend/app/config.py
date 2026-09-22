@@ -30,7 +30,7 @@ def _decrypt_env(value: str) -> str:
 # --- Mode ---
 MODE = os.getenv("AEGIS_MODE", "paper")  # "paper" | "live"
 ADMIN_TOKEN = _decrypt_env(os.getenv("AEGIS_ADMIN_TOKEN", ""))
-CORS_ORIGINS = os.getenv("AEGIS_CORS_ORIGINS", "http://localhost:5173,https://aegis-orpin-xi.vercel.app").split(",")
+CORS_ORIGINS = [o.strip() for o in os.getenv("AEGIS_CORS_ORIGINS", "http://localhost:5173,https://aegis-orpin-xi.vercel.app").split(",") if o.strip()]
 PAPER_CAPITAL = float(os.getenv("AEGIS_INITIAL_CAPITAL", "20"))
 
 # --- ICT/SMC Bot Capital ---

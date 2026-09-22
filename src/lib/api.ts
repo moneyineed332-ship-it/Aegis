@@ -425,7 +425,7 @@ export async function postApi<T>(path: string, body?: unknown): Promise<T> {
     opts.headers = getAdminHeaders();
   }
   const response = await fetch(url, opts);
-  if (!response.ok) throw new Error("AEGIS API request failed");
+  if (!response.ok) throw new Error(`AEGIS API request failed (${response.status})`);
   return response.json() as Promise<T>;
 }
 

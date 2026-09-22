@@ -113,7 +113,7 @@ class OrderManager:
 
         # Circuit breaker check
         circuit = risk_check_circuit()
-        if circuit.get("triggered"):
+        if circuit.get("halted") or circuit.get("triggered"):
             return {"valid": False, "reason": f"Circuit breaker active: {circuit.get('reason')}"}
 
         return {"valid": True}
@@ -496,15 +496,14 @@ def _to_ccxt_symbol(symbol: str) -> str:
 
 
 def risk_check_circuit() -> dict:
-    """Check circuit breaker status."""
+    """Check circuit breaker status (equity valued at market prices)."""
     try:
-        from . import risk
-        positions = storage.list_positions()
+        from . import risk, supervisor
         capital = config.PAPER_CAPITAL
-        equity = capital + sum(p["quantity"] * p["average_price"] for p in positions)
+        equity = supervisor.portfolio_equity(capital)
         return risk.check_circuit_breaker(capital, equity)
     except Exception:
-        return {"triggered": False}
+        return {"halted": False, "triggered": False}
 
 
 # Global OMS instance

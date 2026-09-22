@@ -3,6 +3,8 @@
 import math
 from statistics import fmean
 
+import pytest
+
 from .indicators import (
     ema_series,
     ema_single,
@@ -145,7 +147,9 @@ class TestStochastic:
         candles = [{"high": 10 + i, "low": 8 + i, "close": 9 + i} for i in range(10)]
         k_vals, d_vals = stochastic(candles, 5, 3)
         assert len(k_vals) == 10
-        assert len(d_vals) >= 10
+        # D must be aligned with K: same length, same index (D[i] = SMA of K ending at i)
+        assert len(d_vals) == len(k_vals) == 10
+        assert d_vals[9] == pytest.approx(sum(k_vals[7:10]) / 3)
 
 
 class TestPeriodsPerYear:

@@ -255,7 +255,12 @@ def dashboard() -> dict:
 
 
 @app.post("/api/v1/paper-orders", status_code=201)
-def create_paper_order(order: PaperOrder) -> dict:
+@limiter.limit("10/minute")
+def create_paper_order(
+    request: Request,
+    order: PaperOrder,
+    _admin: None = Depends(require_admin_token),
+) -> dict:
     if storage.get_kill_switch():
         raise HTTPException(423, "Emergency stop is active; paper orders are blocked.")
     symbol = storage.normalize_symbol(order.symbol)
@@ -478,8 +483,8 @@ def resume(request: Request, x_aegis_admin_token: str | None = Header(default=No
     return supervisor.status(False)
 
 
-@limiter.limit("10/minute")
 @app.post("/api/v1/execution/market-order", status_code=201)
+@limiter.limit("10/minute")
 def execute_market_order(
     request: Request,
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
@@ -513,8 +518,8 @@ def execute_market_order(
     return result
 
 
-@limiter.limit("10/minute")
 @app.post("/api/v1/execution/limit-order", status_code=201)
+@limiter.limit("10/minute")
 def execute_limit_order(
     request: Request,
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
@@ -531,7 +536,9 @@ def execute_limit_order(
 
 
 @app.post("/api/v1/execution/fractioned-order", status_code=201)
+@limiter.limit("10/minute")
 def execute_fractioned_order(
+    request: Request,
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     side: Literal["buy", "sell"] = "buy",
     quantity: float = 0.01,
@@ -569,8 +576,8 @@ def estimate_slippage(order_value: float = 100) -> dict:
     return {"order_value": order_value, "estimated_slippage_bps": execution.estimate_slippage(order_value)}
 
 
-@limiter.limit("5/minute")
 @app.post("/api/v1/deployment/pipeline", status_code=201)
+@limiter.limit("5/minute")
 def create_deployment_pipeline(
     request: Request,
     strategy_id: str = "sma_crossover_long_flat",
@@ -1123,8 +1130,8 @@ def sensitivity(
 
 # === ML Regime Prediction ===
 
-@limiter.limit("2/minute")
 @app.post("/api/v1/ml/regime/train", status_code=201)
+@limiter.limit("2/minute")
 def train_ml_regime(request: Request, symbol: str = "BTCUSDT", interval: str = "1h", epochs: int = 200) -> dict:
     """Train ML regime predictor from historical features."""
     candles = storage.list_ohlcv_candles(symbol, interval, limit=5000)

@@ -23,11 +23,35 @@ HEALTH_CHECKS = {
 }
 
 
+def _market_prices() -> dict:
+    """Last known market prices by symbol (empty dict if unavailable)."""
+    try:
+        return {s["symbol"]: s["price"] for s in storage.list_market_snapshots(limit=50)}
+    except Exception:
+        return {}
+
+
+def portfolio_equity(capital: float | None = None) -> float:
+    """Capital + unrealized PnL valued at last market prices.
+
+    Falls back to entry price per position when no snapshot exists,
+    so equity is never worse than cost basis in that case.
+    """
+    from . import position_monitor
+    cap = capital if capital is not None else config.PAPER_CAPITAL
+    try:
+        summary = position_monitor.compute_portfolio_summary(
+            storage.list_positions(), _market_prices(), cap
+        )
+        return float(summary["equity"])
+    except Exception:
+        return cap
+
+
 def _check_drawdown() -> dict:
     """Check if portfolio drawdown exceeds max threshold."""
-    positions = storage.list_positions()
     capital = config.PAPER_CAPITAL
-    equity = capital + sum(p["quantity"] * p["average_price"] for p in positions)
+    equity = portfolio_equity(capital)
     drawdown_pct = ((equity - capital) / capital) * 100 if capital > 0 else 0
 
     max_dd = config.PORTFOLIO_MAX_DRAWDOWN_PCT * 100
@@ -137,7 +161,7 @@ def status(kill_switch_active: bool) -> dict:
     positions = storage.list_positions()
     total_exposure = sum(abs(p["quantity"] * p["average_price"]) for p in positions)
     capital = config.PAPER_CAPITAL
-    equity = capital + sum(p["quantity"] * p["average_price"] for p in positions)
+    equity = portfolio_equity(capital)
 
     return {
         "status": overall,
@@ -185,7 +209,7 @@ def get_system_summary() -> dict:
     """Get a summary of the full system state for the dashboard."""
     positions = storage.list_positions()
     capital = config.PAPER_CAPITAL
-    equity = capital + sum(p["quantity"] * p["average_price"] for p in positions)
+    equity = portfolio_equity(capital)
     exposure = sum(abs(p["quantity"] * p["average_price"]) for p in positions)
 
     # Recent trades

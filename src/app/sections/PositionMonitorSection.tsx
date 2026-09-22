@@ -44,9 +44,9 @@ export default function PositionMonitorSection() {
 
   // WebSocket for live position updates
   useEffect(() => {
-    const baseUrl = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace("http", "ws");
+    const baseUrl = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/^http/, "ws");
     const token = localStorage.getItem("aegis_admin_token") || "";
-    const wsUrl = `${baseUrl}/ws/positions?token=${token}`;
+    const wsUrl = token ? `${baseUrl}/ws/positions?token=${token}` : `${baseUrl}/ws/positions`;
 
     let ws: WebSocket;
     let reconnectTimeout: ReturnType<typeof setTimeout>;

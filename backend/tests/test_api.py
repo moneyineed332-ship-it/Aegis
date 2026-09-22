@@ -46,26 +46,36 @@ def test_dashboard():
 
 # === Paper Orders ===
 
-def test_create_paper_order():
+def test_create_paper_order(client, admin_headers):
+    r = client.post("/api/v1/paper-orders", json={
+        "symbol": "BTC/USDT",
+        "side": "buy",
+        "quantity": 0.0001,
+        "reference_price": 50000,
+    }, headers=admin_headers)
+    assert r.status_code == 201
+    data = r.json()
+    assert data["status"] == "filled_simulated"
+
+
+def test_paper_order_exceeds_limit(client, admin_headers):
+    r = client.post("/api/v1/paper-orders", json={
+        "symbol": "BTC/USDT",
+        "side": "buy",
+        "quantity": 10,
+        "reference_price": 50000,
+    }, headers=admin_headers)
+    assert r.status_code == 422
+
+
+def test_paper_order_requires_auth(client):
     r = client.post("/api/v1/paper-orders", json={
         "symbol": "BTC/USDT",
         "side": "buy",
         "quantity": 0.0001,
         "reference_price": 50000,
     })
-    assert r.status_code == 201
-    data = r.json()
-    assert data["status"] == "filled_simulated"
-
-
-def test_paper_order_exceeds_limit():
-    r = client.post("/api/v1/paper-orders", json={
-        "symbol": "BTC/USDT",
-        "side": "buy",
-        "quantity": 10,
-        "reference_price": 50000,
-    })
-    assert r.status_code == 422
+    assert r.status_code == 401
 
 
 # === Market Snapshots ===
@@ -535,7 +545,7 @@ def test_close_position_not_found(client, admin_headers):
 
 
 def test_close_position_has_position(client, admin_headers):
-    r_order = client.post("/api/v1/paper-orders", json={"symbol": "BTC/USDT", "side": "buy", "quantity": 0.0002, "reference_price": 60000})
+    r_order = client.post("/api/v1/paper-orders", json={"symbol": "BTC/USDT", "side": "buy", "quantity": 0.0002, "reference_price": 60000}, headers=admin_headers)
     assert r_order.status_code == 201
     storage.save_market_snapshots([{"symbol": "BTC/USDT", "price": 65000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
     r = client.post("/api/v1/positions/close", json={"symbol": "BTC/USDT"}, headers=admin_headers)

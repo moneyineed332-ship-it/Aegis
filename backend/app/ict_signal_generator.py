@@ -170,7 +170,8 @@ class ICTSignalGenerator:
         
         # 8. Score de confluence
         confluence_score, confluence_factors = self._calculate_confluence(
-            potential_direction, trend_context, structure, liquidity, fvg, ob
+            potential_direction, trend_context, structure, liquidity, fvg, ob,
+            candles_m15=candles_m15,
         )
         
         if confluence_score < self.min_confluence_score:
@@ -389,7 +390,8 @@ class ICTSignalGenerator:
         structure: Dict,
         liquidity: Dict,
         fvg: Dict,
-        ob: Dict
+        ob: Dict,
+        candles_m15: List[Dict] | None = None,
     ) -> tuple[int, List[ConfluenceFactor]]:
         """
         Calcule le score de confluence (0-10).
@@ -473,7 +475,7 @@ class ICTSignalGenerator:
         # Volatility filter (1 point) — §11: filtre volatilité
         # Check ATR is within acceptable range for the instrument
         if candles_m15 and len(candles_m15) >= 14:
-            from .forex_indicators import atr_single
+            from .indicators import atr_single
             current_atr = atr_single(candles_m15, 14)
             if current_atr is not None and self.cfg.min_atr_pips <= current_atr / self.cfg.pip_value <= self.cfg.max_atr_pips:
                 factors.append(ConfluenceFactor.VOLATILITY)
