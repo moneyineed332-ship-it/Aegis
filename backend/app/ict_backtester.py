@@ -22,7 +22,22 @@ Key Statistics (Cahier des charges §21):
 import logging
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Callable
+from typing import Literal, Optional, Callable, get_args
+
+
+def _as_datetime(value) -> datetime:
+    """Best-effort candle timestamp parser (datetime, ISO string, or epoch)."""
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return datetime.now(timezone.utc)
+    if isinstance(value, (int, float)):
+        ts = value / 1000 if value > 1e12 else value
+        return datetime.fromtimestamp(ts, tz=timezone.utc)
+    return datetime.now(timezone.utc)
 from enum import Enum
 import statistics
 
@@ -224,7 +239,7 @@ class IctBacktester:
         
         # Process candles
         for i, candle in enumerate(candles):
-            if not (start_date <= candle.get("time", datetime.now(timezone.utc)) <= end_date):
+            if not (start_date <= _as_datetime(candle.get("time")) <= end_date):
                 continue
             
             # Update positions
@@ -278,8 +293,14 @@ class IctBacktester:
                         )
             
             # Update equity curve
-            equity_curve.append((candle.get("time", datetime.now(timezone.utc)), self.risk_manager.current_equity))
-        
+            equity_curve.append((_as_datetime(candle.get("time")), self.risk_manager.current_equity))
+
+        # Collect closed trades (TradeRecords are mutated in place on exit).
+        backtest_trades = [
+            t for t in self.risk_manager._trade_history
+            if t.result in ("win", "loss", "breakeven")
+        ]
+
         # Calculate statistics
         statistics = self._calculate_statistics(backtest_trades, equity_curve)
         
@@ -486,8 +507,8 @@ class IctBacktester:
         stats.average_risk_per_trade = statistics.mean([t.risk_amount for t in trades]) if trades else 0.0
         stats.total_risk_taken = sum(t.risk_amount for t in trades)
         
-        # Instrument breakdown
-        for instrument in Instrument:
+        # Instrument breakdown (Instrument is a Literal — iterate its values)
+        for instrument in get_args(Instrument):
             inst_trades = [t for t in trades if t.instrument == instrument]
             if inst_trades:
                 stats.instrument_performance[instrument] = {

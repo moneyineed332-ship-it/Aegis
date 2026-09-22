@@ -22,6 +22,18 @@ def _isolated_db(tmp_path, monkeypatch):
     storage._db_connection = None
     storage._initialized = False
     storage.initialize()
+    # Reset module-global trading guards so tests are order-independent
+    # (e.g. a halted circuit breaker in one test must not reject orders
+    # validated in a later test).
+    import app.risk as risk_mod
+    risk_mod._circuit_breaker.update({
+        "halted": False,
+        "reason": None,
+        "halted_at": None,
+        "daily_pnl": 0.0,
+        "consecutive_losses": 0,
+        "trade_history": [],
+    })
     yield
     # Cleanup: close connection and remove temp DB
     if storage._db_connection:

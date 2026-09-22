@@ -16,6 +16,7 @@ primary_region = "cdg"
   AEGIS_ICT_CAPITAL = "50"
   AEGIS_CCXT_TESTNET = "true"
   AEGIS_ENGINE_ENABLED = "true"
+  AEGIS_DB_PATH = "/data/aegis.db"
   SUPABASE_URL = "https://xthknzlxseghdscpzssm.supabase.co"
 
 [http_service]
@@ -41,3 +42,9 @@ primary_region = "cdg"
   memory = "1gb"
   cpu_kind = "shared"
   cpus = 1
+
+# Persistent SQLite storage. Create the volume once via dashboard/CLI:
+#   fly volumes create aegis_data --region cdg --size 1
+[[mounts]]
+  source = "aegis_data"
+  destination = "/data"

@@ -1,6 +1,6 @@
 """Risk management routes."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Literal
 
@@ -126,5 +126,11 @@ def clear_consensus_votes(_admin: None = Depends(require_admin_token)) -> dict:
 
 
 @router.post("/position-sizing")
-def compute_position_sizing(capital: float, entry_price: float, stop_loss: float, risk_pct: float = 0.02) -> dict:
+def compute_position_sizing(
+    capital: float = Query(gt=0),
+    entry_price: float = Query(gt=0),
+    stop_loss: float = Query(gt=0),
+    risk_pct: float = Query(default=0.02, gt=0, le=1),
+    _admin: None = Depends(require_admin_token),
+) -> dict:
     return execution.calculate_position_size(capital, risk_pct, entry_price, stop_loss)

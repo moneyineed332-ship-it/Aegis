@@ -115,16 +115,26 @@ def fetch_spot_prices() -> list[dict]:
     if crypto_symbols:
         ex = _get_exchange()
         try:
-            # CCXT format: 'BTC/USDT' not 'BTCUSDT'
+            # CCXT format: 'BTC/USDT' not 'BTCUSDT'.
+            # fetch_tickers returns a list of {"symbol": ccxt_symbol, "price": ...},
+            # so match by symbol instead of zipping dict values (order not guaranteed).
             ccxt_symbols = [_to_ccxt_symbol(s) for s in crypto_symbols]
             tickers = ex.fetch_tickers(ccxt_symbols)
-            for symbol, ticker in zip(crypto_symbols, tickers.values()):
-                snapshots.append({
-                    "symbol": symbol,
-                    "price": ticker["last"],
-                    "collected_at": collected_at,
-                    "source": f"ccxt_{ex.exchange_id}",
-                })
+            by_symbol = {t.get("symbol"): t for t in tickers if isinstance(t, dict)}
+            for symbol, ccxt_symbol in zip(crypto_symbols, ccxt_symbols):
+                ticker = by_symbol.get(ccxt_symbol)
+                price = (ticker or {}).get("price")
+                if price:
+                    snapshots.append({
+                        "symbol": symbol,
+                        "price": float(price),
+                        "collected_at": collected_at,
+                        "source": f"ccxt_{ex.exchange_id}",
+                    })
+                else:
+                    fallback_data = _fetch_single_price_fallback(symbol, collected_at)
+                    if fallback_data:
+                        snapshots.append(fallback_data)
         except Exception as e:
             logger.debug("CCXT fetch_tickers failed, falling back to raw API: %s", e, exc_info=True)
             # Fallback for crypto

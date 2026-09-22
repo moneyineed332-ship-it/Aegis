@@ -143,14 +143,12 @@ def current_exposure(positions: list[dict]) -> float:
 
 
 def require_admin_token(
-    request: Request,
     x_aegis_admin_token: str | None = Header(default=None),
 ) -> None:
-    token = x_aegis_admin_token
-    if not token:
-        token = request.query_params.get("token")
+    """Header-only admin auth. Tokens in query strings are rejected
+    (they leak into server/proxy logs and browser history)."""
     from .deps import require_admin_token as _require_admin_token
-    _require_admin_token(token)
+    _require_admin_token(x_aegis_admin_token)
 
 
 def _build_journal_data() -> dict:
@@ -364,6 +362,7 @@ def market_analysis(
 def recommendation(
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=500)
     quality = data_quality.validate_ohlcv(candles, interval)
@@ -434,6 +433,7 @@ def memory_list(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "
 def memory_remember(
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     strategy: str = "unknown",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, "1h", limit=100)
     try:
@@ -466,19 +466,13 @@ def supervisor_status() -> dict:
 
 
 @app.post("/api/v1/supervisor/emergency-stop")
-def emergency_stop(request: Request, x_aegis_admin_token: str | None = Header(default=None)) -> dict:
-    token = x_aegis_admin_token or request.query_params.get("token")
-    from .deps import require_admin_token as _check
-    _check(token)
+def emergency_stop(_admin: None = Depends(require_admin_token)) -> dict:
     storage.set_kill_switch(True, "Emergency stop activated manually.")
     return supervisor.status(True)
 
 
 @app.post("/api/v1/supervisor/resume")
-def resume(request: Request, x_aegis_admin_token: str | None = Header(default=None)) -> dict:
-    token = x_aegis_admin_token or request.query_params.get("token")
-    from .deps import require_admin_token as _check
-    _check(token)
+def resume(_admin: None = Depends(require_admin_token)) -> dict:
     storage.set_kill_switch(False, "Service resumed manually after emergency stop.")
     return supervisor.status(False)
 
@@ -591,6 +585,7 @@ def create_deployment_pipeline(
 def validate_deployment_backtest(
     strategy_id: str = "sma_crossover_long_flat",
     stage: str = "backtest",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     backtests = storage.list_recent_backtests(limit=10)
     relevant = [b for b in backtests if b["strategy"] == strategy_id]
@@ -606,6 +601,7 @@ def refresh_ohlcv(
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
     limit: int = Query(default=200, ge=10, le=500),
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     try:
         candles = market_data.fetch_ohlcv(symbol, interval, limit)
@@ -620,6 +616,7 @@ def refresh_ohlcv(
 def optimize_sma_strategy(
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
     quality = data_quality.validate_ohlcv(candles, interval)
@@ -635,6 +632,7 @@ def optimize_sma_strategy(
 def optimize_donchian_strategy(
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
     quality = data_quality.validate_ohlcv(candles, interval)
@@ -650,6 +648,7 @@ def optimize_donchian_strategy(
 def optimize_mean_reversion_strategy(
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
     quality = data_quality.validate_ohlcv(candles, interval)
@@ -665,6 +664,7 @@ def optimize_mean_reversion_strategy(
 def optimize_grid_strategy(
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
     quality = data_quality.validate_ohlcv(candles, interval)
@@ -680,6 +680,7 @@ def optimize_grid_strategy(
 def compare_all_strategies(
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
     quality = data_quality.validate_ohlcv(candles, interval)
@@ -740,7 +741,7 @@ def update_alert_thresholds(thresholds: dict, _admin: None = Depends(require_adm
 
 
 @app.post("/api/v1/alerts/check")
-async def check_alerts() -> dict:
+async def check_alerts(_admin: None = Depends(require_admin_token)) -> dict:
     """Manually trigger alert checks on current data and broadcast to WS clients."""
     from . import config as _cfg
     all_alerts = []
@@ -1047,6 +1048,7 @@ def advanced_walk_forward(
     interval: str = "1h",
     objective: str = "sharpe_ratio",
     n_splits: int = 3,
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=3000)
     quality = data_quality.validate_ohlcv(candles, interval)
@@ -1076,7 +1078,8 @@ def monte_carlo(
     interval: str = "1h",
     fast_period: int = 10,
     slow_period: int = 30,
-    n_simulations: int = 1000,
+    n_simulations: int = Query(default=1000, ge=10, le=5000),
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
     quality = data_quality.validate_ohlcv(candles, interval)
@@ -1101,6 +1104,7 @@ def sensitivity(
     symbol: str = "BTCUSDT",
     interval: str = "1h",
     param_name: str = "fast_period",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
     quality = data_quality.validate_ohlcv(candles, interval)
@@ -1132,7 +1136,7 @@ def sensitivity(
 
 @app.post("/api/v1/ml/regime/train", status_code=201)
 @limiter.limit("2/minute")
-def train_ml_regime(request: Request, symbol: str = "BTCUSDT", interval: str = "1h", epochs: int = 200) -> dict:
+def train_ml_regime(request: Request, symbol: str = "BTCUSDT", interval: str = "1h", epochs: int = 200, _admin: None = Depends(require_admin_token)) -> dict:
     """Train ML regime predictor from historical features."""
     candles = storage.list_ohlcv_candles(symbol, interval, limit=5000)
     if len(candles) < 200:

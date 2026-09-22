@@ -1,5 +1,5 @@
 -- AEGIS AI Quant — Supabase PostgreSQL Migration
--- Migrated from SQLite (23 tables, 20 indexes)
+-- Migrated from SQLite (22 tables, 20 indexes)
 
 -- ============================================================
 -- POSITIONS
@@ -349,26 +349,27 @@ ALTER TABLE ml_models ENABLE ROW LEVEL SECURITY;
 ALTER TABLE strategy_stats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE trade_outcomes ENABLE ROW LEVEL SECURITY;
 
--- Service role bypass (for backend)
-CREATE POLICY "Service role full access" ON positions FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON paper_orders FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON market_snapshots FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON ohlcv_candles FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON backtests FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON decision_journal FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON system_controls FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON system_alerts FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON fear_greed FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON funding_rates FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON open_interest FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON memory_episodes FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON ict_trades_journal FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON engine_state FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON engine_log FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON trailing_stops_active FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON trade_signals FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON open_orders FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON deployment_pipelines FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON ml_models FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON strategy_stats FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access" ON trade_outcomes FOR ALL USING (TRUE) WITH CHECK (TRUE);
+-- Service role only (backend uses SERVICE_KEY). RLS is enabled with NO
+-- policies for anon/authenticated, so leaked anon keys grant nothing.
+CREATE POLICY "Service role full access" ON positions FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON paper_orders FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON market_snapshots FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON ohlcv_candles FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON backtests FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON decision_journal FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON system_controls FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON system_alerts FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON fear_greed FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON funding_rates FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON open_interest FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON memory_episodes FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON ict_trades_journal FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON engine_state FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON engine_log FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON trailing_stops_active FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON trade_signals FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON open_orders FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON deployment_pipelines FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON ml_models FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON strategy_stats FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY "Service role full access" ON trade_outcomes FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);

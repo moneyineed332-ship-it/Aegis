@@ -54,6 +54,16 @@ def test_validate_valid_order():
     assert result["valid"] is True
 
 
+def test_validate_sell_at_profit_allowed():
+    """Closing a position above entry price must not be rejected."""
+    from unittest.mock import patch
+    oms = OrderManager()
+    positions = [{"symbol": "BTCUSDT", "quantity": 0.0002, "average_price": 50000}]
+    with patch("app.oms.storage.list_positions", return_value=positions):
+        result = oms._validate_pre_trade("BTCUSDT", "sell", 0.0002, 60000)
+    assert result["valid"] is True
+
+
 def test_risk_check_circuit_returns_dict():
     result = risk_check_circuit()
     assert isinstance(result, dict)

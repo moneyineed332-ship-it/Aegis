@@ -89,36 +89,36 @@ class TestStorageCommit:
             assert row is not None
 
 
+def _run_task(coro):
+    """Run an engine task to completion, failing loudly on code bugs.
+
+    Network outages are reported as skips (tasks degrade gracefully
+    offline); any other exception fails the test.
+    """
+    import asyncio
+    import httpx
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(coro)
+    except (httpx.HTTPError, OSError, TimeoutError) as exc:
+        import pytest
+        pytest.skip(f"network unavailable: {exc}")
+    finally:
+        loop.close()
+
+
 class TestEngineTasks:
     def test_task_fetch_prices(self):
         """Verify fetch_prices task runs without error."""
-        try:
-            import asyncio
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(engine.task_fetch_prices())
-            loop.close()
-        except Exception:
-            pass
+        _run_task(engine.task_fetch_prices())
 
     def test_task_check_circuit_breaker(self):
         """Verify circuit breaker task runs without error."""
-        try:
-            import asyncio
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(engine.task_check_circuit_breaker())
-            loop.close()
-        except Exception:
-            pass
+        _run_task(engine.task_check_circuit_breaker())
 
     def test_task_learning(self):
         """Verify learning task runs without error."""
-        try:
-            import asyncio
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(engine.task_learning())
-            loop.close()
-        except Exception:
-            pass
+        _run_task(engine.task_learning())
 
 
 class TestConsensusIntegration:

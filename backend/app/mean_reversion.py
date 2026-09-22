@@ -159,9 +159,14 @@ def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
         std = (upper_band - lower_band) / 4
         z_score = (close - mid) / std if std > 0 else 0
 
-        # Regime filter: skip in strong trends (ADX > 30)
+        # Regime filter: skip entries in strong trends (ADX > 30),
+        # but keep marking equity so the curve stays contiguous.
         adx = adx_series[index] if index < len(adx_series) else 25.0
         if use_regime_filter and adx > 30:
+            equity = cash + quantity * close - short_quantity * close
+            if equity_curve:
+                returns.append(equity / equity_curve[-1] - 1)
+            equity_curve.append(equity)
             continue  # Skip trade, market is trending
 
         # Update stop loss for long
@@ -198,7 +203,7 @@ def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
             execution_price = close * (1 - slippage_rate)
             fee = short_value * fee_rate
             short_quantity = (short_value - fee) / execution_price
-            cash -= fee  # Short proceeds held as margin
+            cash += short_value - fee  # Credit short proceeds
             entry_price = execution_price
             stop_loss = entry_price + atr_stop_mult * atr_series[index]
             trades.append({"side": "short", "price": execution_price, "time": candles[index]["close_time"], "fee": fee, "z_score": z_score})
@@ -208,8 +213,7 @@ def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
             execution_price = close * (1 + slippage_rate)
             cost = short_quantity * execution_price
             fee = cost * fee_rate
-            pnl = (entry_price - execution_price) * short_quantity - fee
-            cash += pnl + (entry_price * short_quantity)
+            cash -= cost + fee  # Pay to cover the short
             trades.append({"side": "cover", "price": execution_price, "time": candles[index]["close_time"], "fee": fee, "z_score": z_score})
             short_quantity = 0.0
 

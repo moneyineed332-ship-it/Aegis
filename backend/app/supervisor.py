@@ -85,16 +85,33 @@ def _check_exposure() -> dict:
 
 
 def _check_position_losses() -> list[dict]:
-    """Check individual positions for excessive loss."""
+    """Check individual positions for excessive loss (market prices).
+
+    A position losing more than POSITION_MAX_LOSS_PCT is critical;
+    an oversized position (vs MAX_ORDER_NOTIONAL) is a warning.
+    """
+    from . import position_monitor
     positions = storage.list_positions()
+    prices = _market_prices()
     alerts = []
+    max_loss_pct = config.POSITION_MAX_LOSS_PCT * 100
     for p in positions:
         if p["quantity"] == 0:
             continue
         symbol = p["symbol"]
-        avg_price = p["average_price"]
-        qty = p["quantity"]
-        notional = abs(qty * avg_price)
+        detail = position_monitor.compute_position_pnl(
+            p, prices.get(symbol, p["average_price"])
+        )
+        loss_pct = detail["unrealized_pnl_pct"]
+        if loss_pct <= -max_loss_pct:
+            alerts.append({
+                "type": "position_loss",
+                "severity": "critical",
+                "symbol": symbol,
+                "pct": loss_pct,
+                "message": f"Position {symbol} down {loss_pct:.2f}% (limit: -{max_loss_pct:.0f}%)",
+            })
+        notional = detail["notional"]
         if notional > config.MAX_ORDER_NOTIONAL:
             alerts.append({
                 "type": "position_size",
@@ -155,6 +172,20 @@ def status(kill_switch_active: bool) -> dict:
     ]
 
     critical = [c for c in checks if c["status"] == "critical"]
+
+    # Individual position losses feed the overall status too.
+    position_alerts = _check_position_losses()
+    position_critical = [a for a in position_alerts if a.get("severity") == "critical"]
+    if position_critical:
+        checks.append({
+            "name": "position_loss",
+            "status": "critical",
+            "value": min(a["pct"] for a in position_critical),
+            "threshold": -config.POSITION_MAX_LOSS_PCT * 100,
+            "message": "; ".join(a["message"] for a in position_critical),
+        })
+        critical = [c for c in checks if c["status"] == "critical"]
+
     overall = "critical" if critical else "healthy"
 
     # Position count
@@ -191,7 +222,15 @@ def evaluate_auto_intervention() -> list[dict]:
     current = status(storage.get_kill_switch())
 
     if current["status"] == "critical" and not storage.get_kill_switch():
-        # Auto-activate kill switch on critical health
+        # Flatten paper positions first so no losing position is left
+        # open behind the kill switch, then auto-activate it.
+        closed = flatten_all_positions(reason="auto_kill_switch")
+        if closed:
+            actions.append({
+                "action": "positions_flattened",
+                "closed": closed,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
         reasons = [c["message"] for c in current["health_checks"] if c["status"] == "critical"]
         reason_str = "; ".join(reasons)
         storage.set_kill_switch(True, f"Auto-activated: {reason_str}")
@@ -203,6 +242,44 @@ def evaluate_auto_intervention() -> list[dict]:
         logger.critical("SUPERVISOR: Auto-activated kill switch — %s", reason_str)
 
     return actions
+
+
+def flatten_all_positions(reason: str = "manual") -> list[dict]:
+    """Close every open paper position at last market price.
+
+    Records a closing order per position and removes it from storage.
+    Positions without any price reference are left untouched and reported.
+    """
+    prices = _market_prices()
+    closed = []
+    for p in storage.list_positions():
+        qty = p.get("quantity", 0)
+        if not qty:
+            continue
+        symbol = p["symbol"]
+        price = prices.get(symbol, p.get("average_price", 0))
+        if not price:
+            closed.append({"symbol": symbol, "closed": False, "reason": "no_price"})
+            continue
+        side = "sell" if qty > 0 else "buy"
+        quantity = abs(qty)
+        storage.save_order_and_position(
+            {
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
+                "reference_price": price,
+                "notional": quantity * price,
+                "status": "filled_flattened",
+                "strategy": "supervisor",
+                "mode": "paper",
+                "reason": reason,
+            },
+            None,
+        )
+        closed.append({"symbol": symbol, "closed": True, "quantity": quantity, "price": price})
+        logger.warning("SUPERVISOR: flattened %s (%s)", symbol, reason)
+    return closed
 
 
 def get_system_summary() -> dict:

@@ -82,6 +82,17 @@ DEFAULT_NEWS_CONFIGS: dict[Instrument, NewsFilterConfig] = {
 }
 
 
+def _parse_aware(value, default: datetime) -> datetime:
+    """Parse an ISO datetime string, always returning an aware UTC datetime."""
+    try:
+        parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
+    except (ValueError, TypeError):
+        return default
+    if not isinstance(parsed, datetime):
+        return default
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 # ============================================================
 # NEWS FILTER CLASS
 # ============================================================
@@ -129,8 +140,8 @@ class NewsFilter:
                 with open(self.cache_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 
-                # Vérifier expiration
-                cached_at = datetime.fromisoformat(data.get("cached_at", "2000-01-01"))
+                # Vérifier expiration (datetimes normalisés aware UTC)
+                cached_at = _parse_aware(data.get("cached_at"), datetime(2000, 1, 1, tzinfo=timezone.utc))
                 if datetime.now(timezone.utc) - cached_at < self._cache_duration:
                     self._events_cache = [
                         EconomicEvent(
@@ -141,7 +152,7 @@ class NewsFilter:
                             forecast=e.get("forecast"),
                             previous=e.get("previous"),
                             actual=e.get("actual"),
-                            datetime_utc=datetime.fromisoformat(e["datetime_utc"]),
+                            datetime_utc=_parse_aware(e["datetime_utc"], datetime.now(timezone.utc)),
                             country=e["country"],
                             category=e["category"],
                             source=e.get("source", "forexfactory"),
@@ -305,6 +316,10 @@ class NewsFilter:
         
         # Vérifier chaque événement
         for event in self._events_cache:
+            # Les événements simulés (source="mock") ne bloquent jamais
+            # réellement le trading — dates approximatives, usage dev uniquement.
+            if event.source == "mock":
+                continue
             # Filtrer par devise concernée
             if event.currency not in cfg.currencies_to_watch:
                 continue

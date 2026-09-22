@@ -78,6 +78,26 @@ def test_paper_order_requires_auth(client):
     assert r.status_code == 401
 
 
+def test_protected_posts_require_auth(client):
+    """Writes and heavy compute endpoints must reject anonymous callers."""
+    for path in (
+        "/api/v1/backtests/sma-crossover/walk-forward",
+        "/api/v1/optimizer/sma",
+        "/api/v1/decisions/recommendation",
+        "/api/v1/memory/remember",
+        "/api/v1/ohlcv/refresh",
+        "/api/v1/alerts/check",
+        "/api/v1/market-snapshots/refresh",
+        "/api/v1/ai/analyze-market",
+        "/api/v1/deployment/validate-backtest",
+        "/api/v1/supervisor/emergency-stop",
+    ):
+        r = client.post(path)
+        assert r.status_code == 401, path
+    r = client.get("/api/v1/free/all")
+    assert r.status_code == 401
+
+
 # === Market Snapshots ===
 
 def test_market_snapshots():
@@ -86,8 +106,8 @@ def test_market_snapshots():
     assert isinstance(r.json(), list)
 
 
-def test_refresh_market_snapshots():
-    r = client.post("/api/v1/market-snapshots/refresh")
+def test_refresh_market_snapshots(admin_headers):
+    r = client.post("/api/v1/market-snapshots/refresh", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert isinstance(data, list)
@@ -101,8 +121,8 @@ def test_ohlcv():
     assert isinstance(r.json(), list)
 
 
-def test_refresh_ohlcv():
-    r = client.post("/api/v1/ohlcv/refresh", params={"symbol": "BTCUSDT", "interval": "1h", "limit": 100})
+def test_refresh_ohlcv(admin_headers):
+    r = client.post("/api/v1/ohlcv/refresh", params={"symbol": "BTCUSDT", "interval": "1h", "limit": 100}, headers=admin_headers)
     assert r.status_code == 201
     data = r.json()
     assert "stored" in data
@@ -151,8 +171,8 @@ def test_market_analysis():
 
 # === Decisions ===
 
-def test_recommendation():
-    r = client.post("/api/v1/decisions/recommendation")
+def test_recommendation(admin_headers):
+    r = client.post("/api/v1/decisions/recommendation", headers=admin_headers)
     assert r.status_code in (201, 422)
 
 
@@ -208,8 +228,8 @@ def test_fear_greed():
     assert isinstance(r.json(), list)
 
 
-def test_refresh_fear_greed():
-    r = client.post("/api/v1/fear-greed/refresh")
+def test_refresh_fear_greed(admin_headers):
+    r = client.post("/api/v1/fear-greed/refresh", headers=admin_headers)
     assert r.status_code in (200, 201, 502)
 
 
@@ -220,8 +240,8 @@ def test_funding_rates():
     assert r.status_code == 200
 
 
-def test_refresh_funding_rates():
-    r = client.post("/api/v1/funding-rates/refresh")
+def test_refresh_funding_rates(admin_headers):
+    r = client.post("/api/v1/funding-rates/refresh", headers=admin_headers)
     assert r.status_code in (200, 201, 502)
 
 
@@ -232,8 +252,8 @@ def test_open_interest():
     assert r.status_code == 200
 
 
-def test_refresh_open_interest():
-    r = client.post("/api/v1/open-interest/refresh")
+def test_refresh_open_interest(admin_headers):
+    r = client.post("/api/v1/open-interest/refresh", headers=admin_headers)
     assert r.status_code in (200, 201, 502)
 
 
@@ -247,8 +267,8 @@ def test_memory_list():
     assert "episodes" in data
 
 
-def test_memory_remember():
-    r = client.post("/api/v1/memory/remember")
+def test_memory_remember(admin_headers):
+    r = client.post("/api/v1/memory/remember", headers=admin_headers)
     assert r.status_code in (201, 422)
 
 
@@ -275,8 +295,8 @@ def test_journal_outcomes():
 
 # === Backtests SMA ===
 
-def test_sma_backtest():
-    r = client.post("/api/v1/backtests/sma-crossover", json={
+def test_sma_backtest(admin_headers):
+    r = client.post("/api/v1/backtests/sma-crossover", headers=admin_headers, json={
         "symbol": "BTCUSDT",
         "interval": "1h",
         "fast_period": 10,
@@ -285,68 +305,68 @@ def test_sma_backtest():
     assert r.status_code in (200, 201, 400, 422)
 
 
-def test_sma_walk_forward():
-    r = client.post("/api/v1/backtests/sma-crossover/walk-forward")
+def test_sma_walk_forward(admin_headers):
+    r = client.post("/api/v1/backtests/sma-crossover/walk-forward", headers=admin_headers)
     assert r.status_code in (200, 201, 400, 404, 422)
 
 
 # === Backtests Donchian ===
 
-def test_donchian_walk_forward():
-    r = client.post("/api/v1/backtests/donchian-breakout/walk-forward")
+def test_donchian_walk_forward(admin_headers):
+    r = client.post("/api/v1/backtests/donchian-breakout/walk-forward", headers=admin_headers)
     assert r.status_code in (200, 201, 400, 404, 422)
 
 
 # === Backtests Mean Reversion ===
 
-def test_mean_reversion_backtest():
-    r = client.post("/api/v1/backtests/mean-reversion", json={
+def test_mean_reversion_backtest(admin_headers):
+    r = client.post("/api/v1/backtests/mean-reversion", headers=admin_headers, json={
         "symbol": "BTCUSDT",
         "interval": "1h",
     })
     assert r.status_code in (200, 201, 400, 422)
 
 
-def test_mean_reversion_walk_forward():
-    r = client.post("/api/v1/backtests/mean-reversion/walk-forward")
+def test_mean_reversion_walk_forward(admin_headers):
+    r = client.post("/api/v1/backtests/mean-reversion/walk-forward", headers=admin_headers)
     assert r.status_code in (200, 201, 400, 404, 422)
 
 
 # === Backtests Grid ===
 
-def test_grid_backtest():
-    r = client.post("/api/v1/backtests/grid", json={
+def test_grid_backtest(admin_headers):
+    r = client.post("/api/v1/backtests/grid", headers=admin_headers, json={
         "symbol": "BTCUSDT",
         "interval": "1h",
     })
     assert r.status_code in (200, 201, 400, 422)
 
 
-def test_grid_walk_forward():
-    r = client.post("/api/v1/backtests/grid/walk-forward")
+def test_grid_walk_forward(admin_headers):
+    r = client.post("/api/v1/backtests/grid/walk-forward", headers=admin_headers)
     assert r.status_code in (200, 201, 400, 404, 422)
 
 
 # === Backtests SMC/ICT ===
 
-def test_smc_ict_backtest():
-    r = client.post("/api/v1/backtests/smc-ict", json={
+def test_smc_ict_backtest(admin_headers):
+    r = client.post("/api/v1/backtests/smc-ict", headers=admin_headers, json={
         "symbol": "BTCUSDT",
         "interval": "1h",
     })
     assert r.status_code in (200, 201, 400, 422)
 
 
-def test_multi_timeframe_backtest():
-    r = client.post("/api/v1/backtests/multi-timeframe", json={
+def test_multi_timeframe_backtest(admin_headers):
+    r = client.post("/api/v1/backtests/multi-timeframe", headers=admin_headers, json={
         "symbol": "BTCUSDT",
         "interval": "1h",
     })
     assert r.status_code in (200, 201, 400, 422)
 
 
-def test_multi_scale_crossover_backtest():
-    r = client.post("/api/v1/backtests/multi-scale-crossover", json={
+def test_multi_scale_crossover_backtest(admin_headers):
+    r = client.post("/api/v1/backtests/multi-scale-crossover", headers=admin_headers, json={
         "symbol": "BTCUSDT",
         "interval": "1h",
     })
@@ -355,8 +375,8 @@ def test_multi_scale_crossover_backtest():
 
 # === Execution ===
 
-def test_market_order():
-    client.post("/api/v1/market-snapshots/refresh")
+def test_market_order(admin_headers):
+    client.post("/api/v1/market-snapshots/refresh", headers=admin_headers)
     r = client.post("/api/v1/execution/market-order", params={
         "symbol": "BTCUSDT",
         "side": "buy",
@@ -394,28 +414,28 @@ def test_estimate_slippage():
 
 # === Phase 3: Optimization ===
 
-def test_optimize_sma():
-    r = client.post("/api/v1/optimizer/sma")
+def test_optimize_sma(admin_headers):
+    r = client.post("/api/v1/optimizer/sma", headers=admin_headers)
     assert r.status_code in (200, 422)
 
 
-def test_optimize_donchian():
-    r = client.post("/api/v1/optimizer/donchian")
+def test_optimize_donchian(admin_headers):
+    r = client.post("/api/v1/optimizer/donchian", headers=admin_headers)
     assert r.status_code in (200, 422)
 
 
-def test_optimize_mean_reversion():
-    r = client.post("/api/v1/optimizer/mean-reversion")
+def test_optimize_mean_reversion(admin_headers):
+    r = client.post("/api/v1/optimizer/mean-reversion", headers=admin_headers)
     assert r.status_code in (200, 422)
 
 
-def test_optimize_grid():
-    r = client.post("/api/v1/optimizer/grid")
+def test_optimize_grid(admin_headers):
+    r = client.post("/api/v1/optimizer/grid", headers=admin_headers)
     assert r.status_code in (200, 422)
 
 
-def test_compare_strategies():
-    r = client.post("/api/v1/optimizer/compare")
+def test_compare_strategies(admin_headers):
+    r = client.post("/api/v1/optimizer/compare", headers=admin_headers)
     assert r.status_code in (200, 422)
 
 
@@ -434,25 +454,25 @@ def test_alert_thresholds():
     assert "max_drawdown_pct" in data
 
 
-def test_check_alerts():
-    r = client.post("/api/v1/alerts/check")
+def test_check_alerts(admin_headers):
+    r = client.post("/api/v1/alerts/check", headers=admin_headers)
     assert r.status_code == 200
 
 
 # === Phase 4: Advanced Backtesting ===
 
-def test_advanced_walk_forward():
-    r = client.post("/api/v1/backtests/advanced/walk-forward")
+def test_advanced_walk_forward(admin_headers):
+    r = client.post("/api/v1/backtests/advanced/walk-forward", headers=admin_headers)
     assert r.status_code in (200, 201, 422)
 
 
-def test_monte_carlo():
-    r = client.post("/api/v1/backtests/advanced/monte-carlo")
+def test_monte_carlo(admin_headers):
+    r = client.post("/api/v1/backtests/advanced/monte-carlo", headers=admin_headers)
     assert r.status_code in (200, 201, 422)
 
 
-def test_sensitivity():
-    r = client.post("/api/v1/backtests/advanced/sensitivity")
+def test_sensitivity(admin_headers):
+    r = client.post("/api/v1/backtests/advanced/sensitivity", headers=admin_headers)
     assert r.status_code in (200, 201, 422)
 
 
@@ -523,18 +543,9 @@ def test_create_pipeline():
         assert data["current_stage"] == "idea"
 
 
-def test_validate_backtest():
-    r = client.post("/api/v1/deployment/validate-backtest")
+def test_validate_backtest(admin_headers):
+    r = client.post("/api/v1/deployment/validate-backtest", headers=admin_headers)
     assert r.status_code in (200, 422)
-
-
-# === Summary ===
-
-def test_all_endpoints():
-    """Run all tests and report summary."""
-    import pytest
-    # This is just a marker for pytest collection
-    pass
 
 
 # === New Endpoint Tests ===
@@ -622,7 +633,7 @@ def test_cancel_open_order(client, admin_headers):
     assert r3.json()["count"] == 0
 
 
-if __name__ == "__main__":
+if False:  # Manual __main__ runner disabled — use pytest instead
     tests = [
         test_health, test_dashboard,
         test_create_paper_order, test_paper_order_exceeds_limit,

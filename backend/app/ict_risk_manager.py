@@ -276,8 +276,8 @@ class IctRiskManager:
             if theoretical_lots < 0.01:
                 blocking_reasons.append(f"Position size trop petite ({theoretical_lots:.4f} lots < 0.01)")
             
-            # 2. DRAWDOWN JOURNALIER
-            daily_dd_pct = abs(self._daily_pnl) / self._session_start_equity if self._session_start_equity > 0 else 0
+            # 2. DRAWDOWN JOURNALIER (losses only — gains must not block)
+            daily_dd_pct = max(0.0, -self._daily_pnl) / self._session_start_equity if self._session_start_equity > 0 else 0
             if daily_dd_pct >= limits.max_daily_drawdown_pct:
                 blocking_reasons.append(f"Daily drawdown limit: {daily_dd_pct:.1%} >= {limits.max_daily_drawdown_pct:.1%}")
             

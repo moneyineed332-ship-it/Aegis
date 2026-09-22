@@ -141,7 +141,7 @@ def run_intraday(candles: list[dict], parameters: dict) -> dict:
                 buy_price = close * (1 + slippage_rate)
                 cost = short_quantity * buy_price
                 fee = cost * fee_rate
-                cash += (entry_price * short_quantity) - cost - fee
+                cash -= cost + fee  # Pay to cover the short
                 pnl = (entry_price - buy_price) / entry_price
                 trades.append({
                     "side": "buy_to_cover", "price": buy_price,
@@ -171,7 +171,7 @@ def run_intraday(candles: list[dict], parameters: dict) -> dict:
                 execution_price = close * (1 - slippage_rate)
                 fee = order_value * fee_rate
                 short_quantity = (order_value - fee) / execution_price
-                cash -= fee
+                cash += order_value - fee  # Credit short proceeds
                 entry_price = execution_price
                 stop_loss = entry_price + atr_stop_mult * atr_val
                 trades.append({
@@ -180,9 +180,7 @@ def run_intraday(candles: list[dict], parameters: dict) -> dict:
                     "stop_loss": round(stop_loss, 2),
                 })
 
-        equity = cash + quantity * close
-        if short_quantity > 0:
-            equity += short_quantity * (2 * entry_price - close)
+        equity = cash + quantity * close - short_quantity * close
         if equity_curve:
             returns.append(equity / equity_curve[-1] - 1)
         equity_curve.append(equity)
@@ -198,6 +196,16 @@ def run_intraday(candles: list[dict], parameters: dict) -> dict:
             max_drawdown = min(max_drawdown, eq / peak - 1)
 
     completed = list(zip(trades[::2], trades[1::2]))
+
+    def _pair_return(open_trade: dict, close_trade: dict) -> float:
+        """Signed return: long wins when price rises, short wins when it falls."""
+        entry = open_trade["price"]
+        if not entry:
+            return 0.0
+        if open_trade["side"] == "buy":
+            return (close_trade["price"] - entry) / entry
+        return (entry - close_trade["price"]) / entry
+
     wins = sum(1 for b, s in completed if s["price"] != b["price"] and
                ((s["side"] == "sell" and s["price"] > b["price"]) or
                 (s["side"] == "buy_to_cover" and s["price"] < b["price"])))
@@ -213,7 +221,7 @@ def run_intraday(candles: list[dict], parameters: dict) -> dict:
         "trade_count": len(completed),
         "win_rate": round(wins / len(completed), 6) if completed else 0.0,
         "avg_trade_return": round(
-            fmean([abs(s["price"] - b["price"]) / b["price"] for b, s in completed]), 6
+            fmean([_pair_return(b, s) for b, s in completed]), 6
         ) if completed else 0.0,
         "strategy": "intraday",
         "parameters_used": {

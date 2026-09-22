@@ -2,9 +2,10 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from .. import free_apis
+from ..deps import require_admin_token
 
 router = APIRouter(prefix="/api/v1/free", tags=["free-apis"])
 
@@ -228,7 +229,7 @@ def get_finnhub_forex(base: str = "USD") -> dict:
 
 
 @router.get("/all")
-def get_free_all_data() -> dict:
+def get_free_all_data(_admin: None = Depends(require_admin_token)) -> dict:
     try:
         return {
             "coingecko_global": free_apis.coingecko_global(),

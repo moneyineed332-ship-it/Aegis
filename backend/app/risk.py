@@ -40,7 +40,14 @@ def restore_circuit_breaker() -> None:
     if saved is not None:
         _circuit_breaker["halted"] = saved.get("halted", False)
         _circuit_breaker["reason"] = saved.get("reason")
-        _circuit_breaker["halted_at"] = saved.get("halted_at")
+        halted_at = saved.get("halted_at")
+        if isinstance(halted_at, str):
+            # Persisted as ISO string — parse back to datetime.
+            try:
+                halted_at = datetime.fromisoformat(halted_at)
+            except ValueError:
+                halted_at = None
+        _circuit_breaker["halted_at"] = halted_at
         _circuit_breaker["daily_pnl"] = saved.get("daily_pnl", 0.0)
         _circuit_breaker["consecutive_losses"] = saved.get("consecutive_losses", 0)
 

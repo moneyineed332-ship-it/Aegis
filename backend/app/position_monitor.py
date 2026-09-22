@@ -161,49 +161,43 @@ def check_position_risks(positions: list[dict], prices: dict[str, float], capita
 
 
 def get_realized_pnl(orders: list[dict]) -> dict:
-    """Compute realized PnL from order history.
+    """Compute realized PnL from order history (FIFO, matched per symbol).
 
-    Uses a simple approach: tracks buy/sell pairs.
+    Unconsumed lots (partial remainders AND untouched later buys) are
+    carried forward. Sells without prior buys (short legs) are ignored
+    here — their PnL stays unrealized until the position closes.
     """
-    buys = []
+    lots: dict[str, list[dict]] = {}
     realized = 0.0
     total_fees = 0.0
 
     for order in sorted(orders, key=lambda o: o.get("id", 0)):
         side = order.get("side", "")
-        notional = order.get("notional", 0)
-        fee = order.get("fee", 0)
-        fill_price = order.get("fill_price", order.get("reference_price", 0))
-        quantity = order.get("quantity", 0)
+        symbol = order.get("symbol", "")
+        notional = order.get("notional", 0) or 0
+        fee = order.get("fee", 0) or 0
+        fill_price = order.get("fill_price", order.get("reference_price", 0)) or 0
+        quantity = order.get("quantity", 0) or 0
         total_fees += fee
 
-        if side == "buy":
-            buys.append({
-                "price": fill_price,
-                "quantity": quantity,
-                "notional": notional,
-            })
-        elif side == "sell" and buys:
-            sell_value = notional
-            # Match against oldest buys (FIFO)
+        if side == "buy" and quantity > 0:
+            lots.setdefault(symbol, []).append({"price": fill_price, "quantity": quantity})
+        elif side == "sell" and quantity > 0:
+            queue = lots.get(symbol, [])
+            remaining = quantity
             cost = 0.0
-            remaining_qty = quantity
-            matched_buys = []
-            for b in buys:
-                if remaining_qty <= 0:
-                    break
-                match_qty = min(b["quantity"], remaining_qty)
-                cost += match_qty * b["price"]
-                remaining_qty -= match_qty
-                if match_qty < b["quantity"]:
-                    matched_buys.append({
-                        "price": b["price"],
-                        "quantity": b["quantity"] - match_qty,
-                        "notional": b["notional"] - match_qty * b["price"],
-                    })
-                # else: fully consumed
-            buys = matched_buys
-            realized += sell_value - cost
+            while remaining > 0 and queue:
+                lot = queue[0]
+                match = min(lot["quantity"], remaining)
+                cost += match * lot["price"]
+                lot["quantity"] -= match
+                remaining -= match
+                if lot["quantity"] <= 0:
+                    queue.pop(0)
+            if remaining <= 0:
+                sell_value = notional or quantity * fill_price
+                realized += sell_value - cost
+            # else: naked/short portion ignored (tracked as unrealized)
 
     return {
         "realized_pnl": round(realized, 2),

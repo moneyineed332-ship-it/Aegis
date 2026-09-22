@@ -70,6 +70,57 @@ def test_check_kill_switch_active():
     assert result["active"] is True
 
 
+def test_position_loss_critical_on_market_drop():
+    positions = [{"symbol": "BTCUSDT", "quantity": 0.001, "average_price": 60000}]
+    snapshots = [{"symbol": "BTCUSDT", "price": 50000}]
+    with patch.object(storage, "list_positions", return_value=positions), \
+         patch.object(storage, "list_market_snapshots", return_value=snapshots):
+        alerts = supervisor._check_position_losses()
+    assert any(a["severity"] == "critical" and a["symbol"] == "BTCUSDT" for a in alerts)
+
+
+def test_position_loss_ok_without_drop():
+    positions = [{"symbol": "BTCUSDT", "quantity": 0.001, "average_price": 60000}]
+    snapshots = [{"symbol": "BTCUSDT", "price": 61000}]
+    with patch.object(storage, "list_positions", return_value=positions), \
+         patch.object(storage, "list_market_snapshots", return_value=snapshots):
+        alerts = supervisor._check_position_losses()
+    assert not [a for a in alerts if a["severity"] == "critical"]
+
+
+def test_flatten_all_positions_closes_and_records():
+    positions = [{"symbol": "BTCUSDT", "quantity": 0.001, "average_price": 60000}]
+    snapshots = [{"symbol": "BTCUSDT", "price": 59000}]
+    saved = []
+    with patch.object(storage, "list_positions", return_value=positions), \
+         patch.object(storage, "list_market_snapshots", return_value=snapshots), \
+         patch.object(storage, "save_order_and_position",
+                      side_effect=lambda order, position: saved.append((order, position))):
+        closed = supervisor.flatten_all_positions(reason="test")
+    assert closed == [{"symbol": "BTCUSDT", "closed": True, "quantity": 0.001, "price": 59000}]
+    order, position = saved[0]
+    assert order["side"] == "sell" and position is None
+
+
+def test_auto_intervention_flattens_before_kill_switch():
+    positions = [{"symbol": "BTCUSDT", "quantity": 0.001, "average_price": 60000}]
+    snapshots = [{"symbol": "BTCUSDT", "price": 40000}]
+    with patch.object(storage, "list_positions", return_value=positions), \
+         patch.object(storage, "list_market_snapshots", return_value=snapshots), \
+         patch.object(storage, "list_strategy_stats", return_value=[]), \
+         patch.object(storage, "list_alerts", return_value=[]), \
+         patch.object(storage, "get_kill_switch", return_value=False), \
+         patch.object(storage, "set_kill_switch") as mock_stop, \
+         patch.object(storage, "save_order_and_position") as mock_save, \
+         patch.object(storage, "list_recent_orders", return_value=[]), \
+         patch.object(storage, "list_engine_logs", return_value=[]):
+        actions = supervisor.evaluate_auto_intervention()
+    kinds = [a["action"] for a in actions]
+    assert "positions_flattened" in kinds
+    assert "kill_switch_activated" in kinds
+    assert mock_save.called and mock_stop.called
+
+
 def test_check_kill_switch_inactive():
     with patch.object(storage, "get_kill_switch", return_value=False):
         result = supervisor._check_kill_switch()

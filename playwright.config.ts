@@ -21,6 +21,12 @@ export default defineConfig({
       port: 8000,
       reuseExistingServer: !process.env.CI,
       timeout: 30000,
+      env: {
+        ...process.env,
+        // Deterministic e2e auth (overrides .env) + no engine for speed.
+        AEGIS_ADMIN_TOKEN: "e2e-test-token",
+        AEGIS_ENGINE_ENABLED: "false",
+      },
     },
     {
       command: "npx vite --host 0.0.0.0 --port 5173",

@@ -3,6 +3,7 @@ import { test, expect } from "@playwright/test";
 test.describe("Paper Trading Flow via API", () => {
   test("can create a paper order via API", async ({ request }) => {
     const response = await request.post("http://localhost:8000/api/v1/paper-orders", {
+      headers: { "X-AEGIS-Admin-Token": "e2e-test-token" },
       data: {
         symbol: "BTC/USDT",
         side: "buy",

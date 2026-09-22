@@ -2,10 +2,11 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import backtesting, config, grid, intraday, market_data, mean_reversion, scalping, swing
+from ..deps import require_admin_token
 
 
 class SmcIctBacktestRequest(BaseModel):
@@ -41,7 +42,11 @@ class MultiScaleCrossoverBacktestRequest(BaseModel):
     min_score: int = Field(default=40, ge=0, le=100)
     atr_stop_multiplier: float = Field(default=2.5, gt=0)
 
-router = APIRouter(prefix="/api/v1/backtests", tags=["backtesting"])
+router = APIRouter(
+    prefix="/api/v1/backtests",
+    tags=["backtesting"],
+    dependencies=[Depends(require_admin_token)],
+)
 
 
 class SmaBacktestRequest(BaseModel):

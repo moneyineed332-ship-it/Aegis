@@ -10,6 +10,38 @@ from app import storage
 from app import position_monitor, config
 
 
+def test_realized_pnl_fifo_keeps_later_buys():
+    """Regression: a partial sell must not discard untouched later buys."""
+    orders = [
+        {"id": 1, "symbol": "BTCUSDT", "side": "buy", "quantity": 1.0,
+         "fill_price": 50000, "notional": 50000, "fee": 5},
+        {"id": 2, "symbol": "BTCUSDT", "side": "buy", "quantity": 1.0,
+         "fill_price": 52000, "notional": 52000, "fee": 5},
+        {"id": 3, "symbol": "BTCUSDT", "side": "sell", "quantity": 0.5,
+         "fill_price": 60000, "notional": 30000, "fee": 3},
+        {"id": 4, "symbol": "BTCUSDT", "side": "sell", "quantity": 1.0,
+         "fill_price": 60000, "notional": 60000, "fee": 6},
+    ]
+    result = position_monitor.get_realized_pnl(orders)
+    # sell1: 0.5 @ 60000 - 0.5 @ 50000 = +5000
+    # sell2: 0.5 @ 60000 (rest of lot1) + 0.5 @ 60000 (lot2)
+    #        - (0.5 @ 50000 + 0.5 @ 52000) = +9000
+    assert result["realized_pnl"] == 14000
+    assert result["total_fees"] == 19
+
+
+def test_realized_pnl_per_symbol():
+    """Buys of one symbol must not fund sells of another."""
+    orders = [
+        {"id": 1, "symbol": "BTCUSDT", "side": "buy", "quantity": 1.0,
+         "fill_price": 50000, "notional": 50000, "fee": 0},
+        {"id": 2, "symbol": "ETHUSDT", "side": "sell", "quantity": 1.0,
+         "fill_price": 3000, "notional": 3000, "fee": 0},
+    ]
+    result = position_monitor.get_realized_pnl(orders)
+    assert result["realized_pnl"] == 0
+
+
 def test_compute_position_pnl_long_profit():
     position = {"symbol": "BTCUSDT", "quantity": 1.0, "average_price": 50000}
     result = position_monitor.compute_position_pnl(position, 55000)

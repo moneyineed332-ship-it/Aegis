@@ -103,10 +103,14 @@ class OrderManager:
         if side == "buy":
             new_exposure = current_exposure + notional
         else:
-            new_exposure = current_exposure - notional
-
-        if new_exposure < 0:
-            return {"valid": False, "reason": "Cannot sell more than owned"}
+            # Closing (or reducing) a position can only release the exposure
+            # stored at entry price. Naked shorts stay forbidden, but selling
+            # at a profit (notional > stored exposure) must not be rejected.
+            current = next((p for p in positions if p["symbol"] == symbol), None)
+            stored = abs(current["quantity"]) * current["average_price"] if current else 0
+            if stored <= 0:
+                return {"valid": False, "reason": "Cannot sell more than owned"}
+            new_exposure = current_exposure - min(notional, stored)
 
         if new_exposure > config.MAX_TOTAL_EXPOSURE:
             return {"valid": False, "reason": f"Total exposure ({new_exposure:.2f}) would exceed max ({config.MAX_TOTAL_EXPOSURE})"}

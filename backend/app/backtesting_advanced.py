@@ -122,6 +122,8 @@ def monte_carlo_simulation(
     params: dict,
     n_simulations: int = 1000,
     confidence_levels: list[float] | None = None,
+    seed: int | None = None,
+    annualization: int = 8760,
 ) -> dict:
     """Monte Carlo simulation by resampling trade returns with replacement.
 
@@ -131,9 +133,13 @@ def monte_carlo_simulation(
         params: Strategy parameters
         n_simulations: Number of simulations
         confidence_levels: Percentiles to report (default [5, 25, 50, 75, 95])
+        seed: Random seed for reproducibility (default None = non-deterministic)
+        annualization: Factor used to annualize simulated per-trade Sharpe
+            (default 8760, i.e. hourly assumption — override per strategy)
     """
     if confidence_levels is None:
         confidence_levels = [5, 25, 50, 75, 95]
+    rng = random.Random(seed)
 
     try:
         base_metrics = strategy_fn(candles, params)
@@ -169,13 +175,13 @@ def monte_carlo_simulation(
         wins = 0
 
         for _ in range(trade_count):
-            if random.random() < win_rate:
+            if rng.random() < win_rate:
                 # Winning trade: sample from log-normal-ish distribution
-                trade_ret = abs(random.gauss(win_return, win_return * 0.3))
+                trade_ret = abs(rng.gauss(win_return, win_return * 0.3))
                 wins += 1
             else:
                 # Losing trade: capped loss (realistic)
-                trade_ret = max(-0.15, random.gauss(loss_return, abs(loss_return) * 0.4))
+                trade_ret = max(-0.15, rng.gauss(loss_return, abs(loss_return) * 0.4))
             returns.append(trade_ret)
             equity *= (1 + trade_ret)
             peak = max(peak, equity)
@@ -184,7 +190,7 @@ def monte_carlo_simulation(
 
         sim_sharpe = 0.0
         if len(returns) > 1 and stdev(returns) > 0:
-            sim_sharpe = fmean(returns) / stdev(returns) * math.sqrt(8760)
+            sim_sharpe = fmean(returns) / stdev(returns) * math.sqrt(annualization)
 
         simulated_returns.append(equity - 1)
         simulated_drawdowns.append(max_sim_dd)

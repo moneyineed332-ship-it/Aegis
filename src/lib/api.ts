@@ -374,10 +374,6 @@ function getAdminHeaders(): Record<string, string> {
   return token ? { "X-AEGIS-Admin-Token": token } : {};
 }
 
-function getAdminToken(): string {
-  return localStorage.getItem("aegis_admin_token") || import.meta.env.VITE_ADMIN_TOKEN || "";
-}
-
 async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, { headers: getAdminHeaders() });
   if (!response.ok) throw new Error(`API error ${response.status}`);
@@ -414,9 +410,9 @@ export async function getJournalAnalysis(): Promise<JournalAnalysis> {
 }
 
 export async function postApi<T>(path: string, body?: unknown): Promise<T> {
-  const token = getAdminToken();
-  const sep = path.includes("?") ? "&" : "?";
-  const url = token ? `${apiBaseUrl}${path}${sep}token=${token}` : `${apiBaseUrl}${path}`;
+  // Header-only auth: tokens in query strings leak into logs/history.
+  // (WebSocket URLs still use ?token= — browsers can't set WS headers.)
+  const url = `${apiBaseUrl}${path}`;
   const opts: RequestInit = { method: "POST" };
   if (body !== undefined) {
     opts.headers = { "Content-Type": "application/json", ...getAdminHeaders() };
