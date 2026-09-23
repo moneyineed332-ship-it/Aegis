@@ -9,7 +9,8 @@ primary_region = "cdg"
 
 [env]
   AEGIS_MODE = "paper"
-  AEGIS_FOCUSED_MODE = "true"
+  AEGIS_ICT_MODE = "true"
+  AEGIS_FOCUSED_MODE = "false"
   AEGIS_FOCUSED_SYMBOLS = "PAXGUSDT,BTCUSDT,ETHUSDT"
   AEGIS_MAX_POSITIONS = "3"
   AEGIS_INITIAL_CAPITAL = "20"

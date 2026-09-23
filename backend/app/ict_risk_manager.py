@@ -52,6 +52,9 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Cooldown après lequel un blocage revenge-trading expire automatiquement (heures).
+REVENGE_BLOCK_COOLDOWN_HOURS = 4
+
 
 # ============================================================
 # TYPES
@@ -182,6 +185,7 @@ class IctRiskManager:
         self._position_size_locked = False
         self._locked_position_size: dict[Instrument, float] = {}
         self._revenge_trading_blocked = False
+        self._revenge_blocked_at: datetime | None = None
         self._last_loss_amount = 0.0
         self._current_position_size_multiplier = 1.0
     
@@ -346,8 +350,18 @@ class IctRiskManager:
                     )
             
             # 12. ANTI-MARTINGALE & ANTI-REVENGE TRADING (Cahier des charges §7)
+            # Le blocage expire après le cooldown (sinon blocage définitif).
             if self._revenge_trading_blocked:
-                blocking_reasons.append("Revenge trading bloqué après perte significative")
+                blocked_at = self._revenge_blocked_at
+                if blocked_at is not None:
+                    from datetime import timedelta
+                    elapsed_h = (datetime.now(timezone.utc) - blocked_at).total_seconds() / 3600
+                    if elapsed_h >= REVENGE_BLOCK_COOLDOWN_HOURS:
+                        self._revenge_trading_blocked = False
+                        self._revenge_blocked_at = None
+                        logger.info("Blocage revenge trading expiré après %.1fh — trading repris", elapsed_h)
+                if self._revenge_trading_blocked:
+                    blocking_reasons.append("Revenge trading bloqué après perte significative")
             
             if self._position_size_locked and instrument in self._locked_position_size:
                 blocking_reasons.append(f"Position size verrouillée à {self._locked_position_size[instrument]:.2f} lots après perte")
@@ -509,6 +523,7 @@ class IctRiskManager:
                 # Si perte significative ou série de pertes, bloquer temporarily
                 if self._consecutive_losses >= 2 or abs(pnl) > (self.current_equity * 0.05):  # 5% de perte
                     self._revenge_trading_blocked = True
+                    self._revenge_blocked_at = datetime.now(timezone.utc)
                     logger.warning("Revenge trading détecté - position size verrouillée")
                 
                 # VERROUILLAGE TAILLE POSITION (Cahier des charges §7)
@@ -667,6 +682,61 @@ class IctRiskManager:
             
             return True, "OK"
     
+    def save_state(self) -> None:
+        """Persist risk state to DB for recovery after restart."""
+        try:
+            import json
+            from . import storage
+            state = {
+                "current_equity": self.current_equity,
+                "daily_pnl": self._daily_pnl,
+                "consecutive_losses": self._consecutive_losses,
+                "peak_equity": self._peak_equity,
+                "trades_today": self._trades_today,
+                "session_start_equity": self._session_start_equity,
+                "last_trade_was_loss": self._last_trade_was_loss,
+                "position_size_locked": self._position_size_locked,
+                "locked_position_size": self._locked_position_size,
+                "revenge_trading_blocked": self._revenge_trading_blocked,
+                "revenge_blocked_at": self._revenge_blocked_at.isoformat()
+                if self._revenge_blocked_at else None,
+                "last_loss_amount": self._last_loss_amount,
+                "position_size_multiplier": self._current_position_size_multiplier,
+            }
+            storage.set_engine_state("ict_risk", json.dumps(state))
+        except Exception as exc:
+            logger.warning("Failed to save ICT risk state: %s", exc)
+
+    def load_state(self) -> None:
+        """Restore risk state from DB (best-effort, keeps defaults on failure)."""
+        try:
+            import json
+            from . import storage
+            from datetime import datetime as _dt
+            raw = storage.get_engine_state("ict_risk")
+            if not raw:
+                return
+            state = json.loads(raw)
+            self.current_equity = float(state.get("current_equity", self.current_equity))
+            self._daily_pnl = float(state.get("daily_pnl", 0.0))
+            self._consecutive_losses = int(state.get("consecutive_losses", 0))
+            self._peak_equity = float(state.get("peak_equity", self.current_equity))
+            self._trades_today = int(state.get("trades_today", 0))
+            self._session_start_equity = float(
+                state.get("session_start_equity", self.current_equity))
+            self._last_trade_was_loss = bool(state.get("last_trade_was_loss", False))
+            self._position_size_locked = bool(state.get("position_size_locked", False))
+            self._locked_position_size = state.get("locked_position_size", {}) or {}
+            self._revenge_trading_blocked = bool(state.get("revenge_trading_blocked", False))
+            blocked_at = state.get("revenge_blocked_at")
+            self._revenge_blocked_at = _dt.fromisoformat(blocked_at) if blocked_at else None
+            self._last_loss_amount = float(state.get("last_loss_amount", 0.0))
+            self._current_position_size_multiplier = float(
+                state.get("position_size_multiplier", 1.0))
+            logger.info("ICT risk state restored (equity=%.2f)", self.current_equity)
+        except Exception as exc:
+            logger.warning("Failed to restore ICT risk state: %s", exc)
+
     def reset_martingale_protections(self, instrument: Instrument) -> None:
         """
         Réinitialise les protections anti-martingale (après période de calme).
@@ -677,6 +747,7 @@ class IctRiskManager:
                 del self._locked_position_size[instrument]
             self._position_size_locked = False
             self._revenge_trading_blocked = False
+            self._revenge_blocked_at = None
             self._current_position_size_multiplier = 1.0
             logger.info(f"Protections anti-martingale réinitialisées pour {instrument}")
     

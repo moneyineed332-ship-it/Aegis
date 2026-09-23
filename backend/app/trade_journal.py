@@ -520,12 +520,37 @@ class TradeJournal:
                 
                 if entry.entry_time:
                     entry.duration_hours = (entry.exit_time - entry.entry_time).total_seconds() / 3600
-                
+
                 logger.info(f"Trade journal entry updated: {trade_id} - {result}")
+                self._persist_closed_trade(entry)
                 return entry
-        
+
         logger.warning(f"Trade journal entry not found: {trade_id}")
         return None
+
+    def _persist_closed_trade(self, entry: "TradeJournalEntry") -> None:
+        """Persist a closed trade to the SQL journal (survives restarts)."""
+        try:
+            from . import storage
+            date = entry.date.isoformat() if hasattr(entry.date, "isoformat") else str(entry.date)
+            storage.save_ict_trade_journal(
+                date=date,
+                instrument=str(entry.instrument),
+                direction=str(entry.direction),
+                setup=entry.setup_type or "",
+                timeframe=entry.timeframe or "",
+                entry_price=float(entry.entry_price),
+                sl_price=float(entry.sl_price),
+                tp_price=float(entry.tp_price),
+                risk_amount=float(entry.risk_amount),
+                result=str(entry.result),
+                rr_ratio=float(entry.rr_ratio),
+                drawdown=float(entry.drawdown_at_close or 0),
+                pnl=float(entry.pnl or 0),
+                notes=entry.notes or "",
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to persist journal entry {entry.trade_id}: {exc}")
     
     def get_entry(self, trade_id: str) -> Optional[TradeJournalEntry]:
         """Get a journal entry by ID."""

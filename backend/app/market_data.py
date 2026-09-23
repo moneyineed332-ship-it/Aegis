@@ -63,6 +63,106 @@ FEAR_GREED_URL = config.FEAR_GREED_URL
 # Forex symbols for ICT/SMC bot
 FOREX_SYMBOLS = ("EURUSD", "GBPUSD", "XAUUSD")
 
+# Yahoo Finance fallback when MT5 is unavailable (Linux/Docker — MT5 is
+# Windows-only and not in requirements). No API key required.
+_YAHOO_SYMBOLS = {"EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X", "XAUUSD": "GC=F"}
+_YAHOO_INTERVALS = {"5m": "5m", "15m": "15m", "1h": "60m", "4h": "60m"}
+
+
+def _fetch_yahoo_chart(yahoo_symbol: str, yahoo_interval: str) -> dict | None:
+    """Raw Yahoo Finance v8 chart payload (or None on failure)."""
+    try:
+        client = _get_http_client()
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}"
+        response = client.get(url, params={"interval": yahoo_interval, "range": "1mo"})
+        response.raise_for_status()
+        results = (response.json().get("chart") or {}).get("result") or []
+        return results[0] if results else None
+    except Exception as e:
+        logger.debug("Yahoo chart fetch failed for %s: %s", yahoo_symbol, e)
+        return None
+
+
+def _fetch_ohlcv_yahoo(symbol: str, interval: str, limit: int) -> list[dict]:
+    """Forex OHLCV via Yahoo Finance (MT5 unavailable)."""
+    yahoo_symbol = _YAHOO_SYMBOLS.get(symbol)
+    yahoo_interval = _YAHOO_INTERVALS.get(interval)
+    if not yahoo_symbol or not yahoo_interval:
+        return []
+    result = _fetch_yahoo_chart(yahoo_symbol, yahoo_interval)
+    if not result:
+        return []
+    timestamps = result.get("timestamp") or []
+    quotes = ((result.get("indicators") or {}).get("quote") or [{}])[0]
+    rows = []
+    for i, ts in enumerate(timestamps):
+        try:
+            o = (quotes.get("open") or [])[i]
+            h = (quotes.get("high") or [])[i]
+            lo = (quotes.get("low") or [])[i]
+            c = (quotes.get("close") or [])[i]
+            if None in (o, h, lo, c):
+                continue
+            rows.append({
+                "open_time": int(ts * 1000),
+                "open": float(o), "high": float(h),
+                "low": float(lo), "close": float(c),
+                "volume": float((quotes.get("volume") or [0] * len(timestamps))[i] or 0),
+            })
+        except (IndexError, TypeError, ValueError):
+            continue
+    rows = rows[-limit:] if limit > 0 else rows
+    if interval == "4h":
+        # Resample 60m buckets into 4h candles.
+        resampled = []
+        for j in range(0, len(rows), 4):
+            chunk = rows[j:j + 4]
+            if not chunk:
+                continue
+            resampled.append({
+                "open_time": chunk[0]["open_time"],
+                "open": chunk[0]["open"], "high": max(r["high"] for r in chunk),
+                "low": min(r["low"] for r in chunk), "close": chunk[-1]["close"],
+                "volume": sum(r["volume"] for r in chunk),
+            })
+        rows = resampled[-limit:] if limit > 0 else resampled
+    interval_ms = _interval_to_ms(interval)
+    return [
+        {
+            "symbol": symbol,
+            "interval": interval,
+            "open_time": r["open_time"],
+            "close_time": r["open_time"] + interval_ms - 1,
+            "open": r["open"], "high": r["high"], "low": r["low"],
+            "close": r["close"], "volume": r["volume"],
+            "source": "yahoo_finance",
+        }
+        for r in rows
+    ]
+
+
+def _fetch_forex_spot_yahoo(symbol: str, collected_at: str) -> dict | None:
+    """Single forex spot price via Yahoo Finance (MT5 unavailable)."""
+    yahoo_symbol = _YAHOO_SYMBOLS.get(symbol)
+    if not yahoo_symbol:
+        return None
+    result = _fetch_yahoo_chart(yahoo_symbol, "5m")
+    if not result:
+        return None
+    try:
+        closes = ((result.get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+        valid = [c for c in closes if c]
+        if not valid:
+            return None
+        return {
+            "symbol": symbol,
+            "price": float(valid[-1]),
+            "collected_at": collected_at,
+            "source": "yahoo_finance",
+        }
+    except (TypeError, ValueError):
+        return None
+
 # Focused mode: price collection restricted to the focused universe.
 if config.ICT_MODE and hasattr(config, 'ICT_SYMBOLS'):
     SYMBOLS = tuple(config.ICT_SYMBOLS)
@@ -94,7 +194,7 @@ def fetch_spot_prices() -> list[dict]:
     forex_symbols = [s for s in SYMBOLS if _is_forex_symbol(s)]
     crypto_symbols = [s for s in SYMBOLS if not _is_forex_symbol(s)]
     
-    # Fetch Forex prices via MT5
+    # Fetch Forex prices via MT5 (Yahoo fallback when unavailable)
     if forex_symbols:
         mt5_conn = _get_mt5_connector()
         if mt5_conn is not None:
@@ -110,6 +210,15 @@ def fetch_spot_prices() -> list[dict]:
                         })
                 except Exception as e:
                     logger.debug("MT5 tick fetch failed for %s: %s", symbol, e, exc_info=True)
+        have = {s["symbol"] for s in snapshots}
+        for symbol in forex_symbols:
+            if symbol not in have:
+                try:
+                    fallback = _fetch_forex_spot_yahoo(symbol, collected_at)
+                    if fallback:
+                        snapshots.append(fallback)
+                except Exception as e:
+                    logger.debug("Yahoo spot fetch failed for %s: %s", symbol, e, exc_info=True)
     
     # Fetch crypto prices via CCXT
     if crypto_symbols:
@@ -205,11 +314,11 @@ def fetch_ohlcv(symbol: str, interval: str, limit: int, end_time: int | None = N
 
 
 def _fetch_ohlcv_mt5(symbol: str, interval: str, limit: int, end_time: int | None = None) -> list[dict]:
-    """Fetch OHLCV candles via MT5 for Forex symbols."""
+    """Fetch OHLCV candles via MT5 for Forex symbols (Yahoo fallback on Linux)."""
     mt5_conn = _get_mt5_connector()
     if mt5_conn is None:
-        logger.error("MT5 connector not available for Forex data")
-        return []
+        logger.info("MT5 unavailable, using Yahoo Finance fallback for %s %s", symbol, interval)
+        return _fetch_ohlcv_yahoo(symbol, interval, limit)
     
     try:
         # Convert end_time to datetime if provided
@@ -243,7 +352,7 @@ def _fetch_ohlcv_mt5(symbol: str, interval: str, limit: int, end_time: int | Non
         ]
     except Exception as e:
         logger.error("MT5 fetch_ohlcv failed for %s: %s", symbol, e, exc_info=True)
-        return []
+        return _fetch_ohlcv_yahoo(symbol, interval, limit)
 
 
 def _fetch_ohlcv_fallback(symbol: str, interval: str, limit: int, end_time: int | None) -> list[dict]:

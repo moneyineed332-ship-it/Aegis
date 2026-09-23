@@ -239,13 +239,14 @@ class ICTSignalGenerator:
     def _analyze_structure(self, candles: List[Dict]) -> Dict:
         """Analyse la structure de marché."""
         ms = market_structure(candles, lookback=10)
-        
+
         return {
             "trend": ms.get("trend", "neutral"),
             "last_bos": ms.get("last_bos"),
             "last_choch": ms.get("last_choch"),
             "structure_points": ms.get("structure_points", []),
-            "swing_highs_lows": swing_highs_lows(candles, lookback=10)
+            "swing_highs_lows": swing_highs_lows(candles, lookback=10),
+            "last_price": candles[-1]["close"] if candles else 0.0,
         }
     
     def _analyze_liquidity(self, candles: List[Dict]) -> Dict:
@@ -278,21 +279,22 @@ class ICTSignalGenerator:
         bias_bullish = trend_context in ["bullish", "bullish_weak"]
         bias_bearish = trend_context in ["bearish", "bearish_weak"]
         
-        last_bos = structure.get("last_bos")
-        last_choch = structure.get("last_choch")
+        # market_structure() emits "bullish_bos"/"bearish_choch"-style values.
+        last_bos = str(structure.get("last_bos") or "")
+        last_choch = str(structure.get("last_choch") or "")
         bull_sweep = liquidity.get("recent_bull_sweep")
         bear_sweep = liquidity.get("recent_bear_sweep")
-        
+
         # Préférence pour trend-following
-        if bias_bullish and (last_bos == "bullish" or bull_sweep):
+        if bias_bullish and (last_bos.startswith("bullish") or bull_sweep):
             return SignalDirection.BUY
-        elif bias_bearish and (last_bos == "bearish" or bear_sweep):
+        elif bias_bearish and (last_bos.startswith("bearish") or bear_sweep):
             return SignalDirection.SELL
-        
+
         # Contre-trend sur CHoCH avec confluence
-        if bias_bullish and last_choch == "bearish" and (bull_sweep or ob.get("bullish_ob")):
+        if bias_bullish and last_choch.startswith("bearish") and (bull_sweep or ob.get("bullish_ob")):
             return SignalDirection.BUY
-        elif bias_bearish and last_choch == "bullish" and (bear_sweep or ob.get("bearish_ob")):
+        elif bias_bearish and last_choch.startswith("bullish") and (bear_sweep or ob.get("bearish_ob")):
             return SignalDirection.SELL
         
         return SignalDirection.NEUTRAL
@@ -318,56 +320,54 @@ class ICTSignalGenerator:
         buffer_price = self.cfg.sl_structure_buffer_pips * pip
 
         if direction == SignalDirection.BUY:
-            # Entry: sur FVG ou OB bullish
-            bull_fvg = fvg.get("bullish_fvg")
-            bull_ob = ob.get("bullish_ob")
+            # Entry: sur FVG ou OB bullish (clés réelles: price_low/price_high)
+            bull_fvg = fvg.get("bullish_fvg") or {}
+            bull_ob = ob.get("bullish_ob") or {}
 
             if bull_fvg:
-                entry = bull_fvg.get("low", current_price)
+                entry = bull_fvg.get("price_low", current_price)
             elif bull_ob:
-                entry = bull_ob.get("low", current_price)
+                entry = bull_ob.get("price_low", current_price)
             else:
                 entry = current_price
 
             # SL: sous le swing low récent + buffer structure (§8)
-            swing_lows = structure.get("swing_highs_lows", {}).get("lows", [])
+            swing_lows = _swing_prices(structure.get("swing_highs_lows", {}).get("lows", []))
             if swing_lows:
-                sl = min(swing_lows[-3:]) if len(swing_lows) >= 3 else min(swing_lows)
-                sl -= buffer_price  # Buffer below structure
+                sl = min(swing_lows[-3:]) - buffer_price  # Buffer below structure
             else:
                 sl = entry - (self.cfg.sl_atr_multiplier * pip * 10)  # Fallback: ATR-based
 
-            # TP: sur zone de liquidité suivante (§9)
+            # TP: sur zone de liquidité suivante (§9, clé réelle: price)
             buy_liq = liquidity.get("buy_side_liquidity", [])
             if buy_liq:
-                tp = buy_liq[0].get("high", entry + self.cfg.target_rr_ratio * abs(entry - sl))
+                tp = buy_liq[0].get("price", entry + self.cfg.target_rr_ratio * abs(entry - sl))
             else:
                 tp = entry + self.cfg.target_rr_ratio * abs(entry - sl)  # RR-based fallback
 
         else:  # SELL
             # Entry: sur FVG ou OB bearish
-            bear_fvg = fvg.get("bearish_fvg")
-            bear_ob = ob.get("bearish_ob")
+            bear_fvg = fvg.get("bearish_fvg") or {}
+            bear_ob = ob.get("bearish_ob") or {}
 
             if bear_fvg:
-                entry = bear_fvg.get("high", current_price)
+                entry = bear_fvg.get("price_high", current_price)
             elif bear_ob:
-                entry = bear_ob.get("high", current_price)
+                entry = bear_ob.get("price_high", current_price)
             else:
                 entry = current_price
 
             # SL: au-dessus du swing high récent + buffer structure (§8)
-            swing_highs = structure.get("swing_highs_lows", {}).get("highs", [])
+            swing_highs = _swing_prices(structure.get("swing_highs_lows", {}).get("highs", []))
             if swing_highs:
-                sl = max(swing_highs[-3:]) if len(swing_highs) >= 3 else max(swing_highs)
-                sl += buffer_price  # Buffer above structure
+                sl = max(swing_highs[-3:]) + buffer_price  # Buffer above structure
             else:
                 sl = entry + (self.cfg.sl_atr_multiplier * pip * 10)  # Fallback: ATR-based
 
             # TP: sur zone de liquidité suivante (§9)
             sell_liq = liquidity.get("sell_side_liquidity", [])
             if sell_liq:
-                tp = sell_liq[0].get("low", entry - self.cfg.target_rr_ratio * abs(sl - entry))
+                tp = sell_liq[0].get("price", entry - self.cfg.target_rr_ratio * abs(sl - entry))
             else:
                 tp = entry - self.cfg.target_rr_ratio * abs(sl - entry)  # RR-based fallback
 
@@ -416,15 +416,15 @@ class ICTSignalGenerator:
             factors.append(ConfluenceFactor.TREND_ALIGNMENT)
             score += 2
 
-        # BOS/CHoCH (2 points)
-        last_bos = structure.get("last_bos")
-        last_choch = structure.get("last_choch")
-        if (direction == SignalDirection.BUY and last_bos == "bullish") or \
-           (direction == SignalDirection.SELL and last_bos == "bearish"):
+        # BOS/CHoCH (2 points) — valeurs "bullish_bos"/"bearish_choch".
+        last_bos = str(structure.get("last_bos") or "")
+        last_choch = str(structure.get("last_choch") or "")
+        if (direction == SignalDirection.BUY and last_bos.startswith("bullish")) or \
+           (direction == SignalDirection.SELL and last_bos.startswith("bearish")):
             factors.append(ConfluenceFactor.BOS_CHOCH)
             score += 2
-        elif (direction == SignalDirection.BUY and last_choch == "bearish") or \
-             (direction == SignalDirection.SELL and last_choch == "bullish"):
+        elif (direction == SignalDirection.BUY and last_choch.startswith("bearish")) or \
+             (direction == SignalDirection.SELL and last_choch.startswith("bullish")):
             factors.append(ConfluenceFactor.BOS_CHOCH)
             score += 1
 
@@ -449,11 +449,11 @@ class ICTSignalGenerator:
             score += 1
 
         # Premium/Discount zone (1 point) — §6: retour dans zone institutionnelle
-        swing_highs = structure.get("swing_highs_lows", {}).get("highs", [])
-        swing_lows = structure.get("swing_highs_lows", {}).get("lows", [])
+        swing_highs = _swing_prices(structure.get("swing_highs_lows", {}).get("highs", []))
+        swing_lows = _swing_prices(structure.get("swing_highs_lows", {}).get("lows", []))
         if swing_highs and swing_lows:
-            high = max(swing_highs[-5:]) if len(swing_highs) >= 5 else max(swing_highs)
-            low = min(swing_lows[-5:]) if len(swing_lows) >= 5 else min(swing_lows)
+            high = max(swing_highs[-5:])
+            low = min(swing_lows[-5:])
             mid = (high + low) / 2
             if direction == SignalDirection.BUY:
                 # Buy in discount zone (below 50%)
@@ -565,3 +565,12 @@ def generate_ict_signal(
 
 # Instance par défaut pour facilité d'utilisation
 default_signal_generator = ICTSignalGenerator("EURUSD")
+
+
+def _swing_prices(points: List) -> List[float]:
+    """Extract prices from swing points (dicts {"price": ...} or raw numbers)."""
+    if not points:
+        return []
+    if isinstance(points[0], dict):
+        return [float(p.get("price", 0)) for p in points]
+    return [float(p) for p in points]

@@ -26,7 +26,7 @@ from .ict_config import MTF_HIERARCHY, REQUIRED_TIMEFRAMES, TIMEFRAME_MAPPING, I
 from .alerts import manager as alert_manager
 from .scheduler import scheduler
 from . import smc_ict, multi_timeframe
-from .indicators import multi_timeframe_confluence, multi_scale_crossover
+from .indicators import atr_single, multi_timeframe_confluence, multi_scale_crossover
 
 # ICT/SMC pipeline (Cahier des charges)
 _ict_signal_generator = None
@@ -70,6 +70,11 @@ def _save_state() -> None:
         storage.set_engine_state("last_mtf_analysis", json.dumps(_last_mtf_analysis))
         storage.set_engine_state("cycle_count", str(_cycle_count))
         storage.set_engine_state("last_ict_signals", json.dumps(_last_ict_signals))
+        # ICT/SMC persistence (risk locks, open positions)
+        if _ict_risk_manager is not None:
+            _ict_risk_manager.save_state()
+        if _ict_position_manager is not None:
+            _ict_position_manager.save_state()
     except Exception as exc:
         logger.warning("Failed to save engine state: %s", exc)
 
@@ -94,12 +99,22 @@ def _init_ict_pipeline() -> None:
         if _ict_position_manager is None:
             _ict_position_manager = PositionManager(risk_manager=_ict_risk_manager)
             logger.info("ICT Position Manager initialized")
+        # Restore persisted ICT state (best-effort)
+        try:
+            _ict_risk_manager.load_state()
+            _ict_position_manager.load_state()
+        except Exception as exc:
+            logger.warning("Failed to restore ICT state: %s", exc)
     except Exception as exc:
         logger.error("Failed to initialize ICT pipeline: %s", exc)
 
 
 def _get_ict_signal(instrument: Instrument, current_price: float):
-    """Generate an ICT/SMC signal for one instrument using multi-TF candles."""
+    """Generate an ICT/SMC signal for one instrument using multi-TF candles.
+
+    Returns (signal_or_None, m15_candles) so callers can reuse M15 data
+    (e.g. ATR for the §18 volatility gate) without refetching.
+    """
     from .ict_signal_generator import ICTSignalGenerator
 
     tf_map = {"H4": "4h", "H1": "1h", "M15": "15m", "M5": "5m"}
@@ -111,17 +126,19 @@ def _get_ict_signal(instrument: Instrument, current_price: float):
             candles_by_tf[tf_name] = raw
             storage.save_ohlcv_candles(raw)
 
+    m15 = candles_by_tf.get("M15", [])
     if len(candles_by_tf) < 4:
-        return None
+        return None, m15
 
     gen = ICTSignalGenerator(instrument)
-    return gen.generate_signal(
+    signal = gen.generate_signal(
         candles_h4=candles_by_tf.get("H4", []),
         candles_h1=candles_by_tf.get("H1", []),
-        candles_m15=candles_by_tf.get("M15", []),
+        candles_m15=m15,
         candles_m5=candles_by_tf.get("M5", []),
         current_price=current_price,
     )
+    return signal, m15
 
 
 # ============================================================
@@ -149,11 +166,12 @@ async def task_fetch_prices():
 async def task_fetch_analysis():
     """Fetch OHLCV for all symbols, compute features, regime, and SMC/ICT analysis with multi-TF hierarchy."""
     global _last_analysis, _last_smc_analysis, _last_mtf_analysis, _last_analyses
-    # FOCUSED_MODE takes priority; then ICT symbols; then default symbols
-    if config.FOCUSED_MODE:
-        symbols = config.FOCUSED_SYMBOLS
-    elif hasattr(config, 'ICT_SYMBOLS'):
+    # Same priority as market_data.SYMBOLS: ICT universe first when
+    # ICT_MODE is on, then focused crypto universe, then defaults.
+    if config.ICT_MODE and hasattr(config, 'ICT_SYMBOLS'):
         symbols = config.ICT_SYMBOLS
+    elif config.FOCUSED_MODE:
+        symbols = config.FOCUSED_SYMBOLS
     else:
         symbols = config.SYMBOLS
     
@@ -277,7 +295,7 @@ async def _run_ict_pipeline() -> None:
             continue
 
         try:
-            signal = _get_ict_signal(instrument, price)
+            signal, candles_m15 = _get_ict_signal(instrument, price)
             if signal is None:
                 storage.log_engine_event(_get_cycle_id(), "ict_no_signal", {
                     "instrument": instrument,
@@ -305,12 +323,22 @@ async def _run_ict_pipeline() -> None:
             # Aucun module ne peut contourner le Risk Manager.
             if _ict_risk_manager is None:
                 continue
+            # §11/§18 volatility gate: ATR in pips from M15 candles.
+            current_atr_pips = None
+            try:
+                from .ict_config import get_instrument_config as _get_cfg
+                pip_value = _get_cfg(instrument).pip_value
+                if candles_m15 and len(candles_m15) >= 15 and pip_value:
+                    current_atr_pips = atr_single(candles_m15, 14) / pip_value
+            except Exception:
+                current_atr_pips = None
             risk_status = _ict_risk_manager.check_all_limits(
                 instrument=instrument,
                 entry_price=signal.entry_price,
                 sl_price=signal.sl_price,
                 tp_price=signal.tp_price,
                 direction=direction,
+                current_atr_pips=current_atr_pips,
             )
             if not risk_status.can_trade:
                 storage.log_engine_event(_get_cycle_id(), "ict_trade_refused", {

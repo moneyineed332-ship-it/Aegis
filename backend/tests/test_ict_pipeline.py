@@ -122,16 +122,20 @@ class TestICTRiskManager:
 
     def test_check_all_limits_passes_on_fresh_state(self):
         rm = IctRiskManager(initial_capital=50.0)
+        # Session gate is time-of-day dependent — neutralize it so this
+        # test is deterministic at any hour.
+        from unittest.mock import patch as _patch
         # 50€ × 0.5% = 0.25€ risk. EURUSD pip_value=0.0001, contract=100000
         # pip_value_per_lot = 10. Need lots >= 0.01
         # lots = 0.25 / (sl_pips * 10) → sl_pips must be <= 2.5
-        status = rm.check_all_limits(
-            instrument="EURUSD",
-            entry_price=1.1000,
-            sl_price=1.0998,  # 2 pips SL → lots = 0.0125
-            tp_price=1.1004,  # 4 pips TP → RR 2.0
-            direction="buy",
-        )
+        with _patch("app.ict_risk_manager.is_trading_allowed", return_value=True):
+            status = rm.check_all_limits(
+                instrument="EURUSD",
+                entry_price=1.1000,
+                sl_price=1.0998,  # 2 pips SL → lots = 0.0125
+                tp_price=1.1004,  # 4 pips TP → RR 2.0
+                direction="buy",
+            )
         assert isinstance(status, RiskStatus)
         assert status.can_trade is True
         assert status.blocking_reasons == []
@@ -254,8 +258,9 @@ class TestICTPipelineIntegration:
         fake_signal.trend_context = "bullish"
 
         with patch.object(config, "ICT_MODE", True), \
-             patch("app.engine._get_ict_signal", return_value=fake_signal), \
-             patch("app.engine._ict_risk_manager", IctRiskManager(initial_capital=50.0)):
+             patch("app.engine._get_ict_signal", return_value=(fake_signal, [])), \
+             patch("app.engine._ict_risk_manager", IctRiskManager(initial_capital=50.0)), \
+             patch("app.ict_risk_manager.is_trading_allowed", return_value=True):
             asyncio.run(engine._run_ict_pipeline())
 
         assert "EURUSD" in engine._last_ict_signals
@@ -281,7 +286,7 @@ class TestICTPipelineIntegration:
         fake_signal.trend_context = "bullish"
 
         with patch.object(config, "ICT_MODE", True), \
-             patch("app.engine._get_ict_signal", return_value=fake_signal), \
+             patch("app.engine._get_ict_signal", return_value=(fake_signal, [])), \
              patch("app.engine._ict_risk_manager", IctRiskManager(initial_capital=50.0)):
             asyncio.run(engine._run_ict_pipeline())
 

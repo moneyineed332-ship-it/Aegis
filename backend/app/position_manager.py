@@ -9,6 +9,7 @@ Implements the 4 position management modes as per cahier des charges:
 Each mode can be tested separately to determine which has the best statistics.
 """
 
+import json
 import logging
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
@@ -74,9 +75,9 @@ class Position:
     rr_ratio: float
     mode: PositionMode
     
-    # Current state
-    current_sl_price: float
-    current_tp_price: float
+    # Current state (None = not yet set, derived from initial in __post_init__)
+    current_sl_price: Optional[float] = None
+    current_tp_price: Optional[float] = None
     status: TradeStatus = TradeStatus.OPEN
     entry_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     exit_time: Optional[datetime] = None
@@ -103,9 +104,94 @@ class Position:
     journal_entry_id: str = ""  # Link to trade journal entry
     
     def __post_init__(self):
-        """Initialize derived fields."""
-        self.current_sl_price = self.initial_sl_price
-        self.current_tp_price = self.initial_tp_price
+        """Initialize derived fields (explicitly passed live values are kept)."""
+        if self.current_sl_price is None:
+            self.current_sl_price = self.initial_sl_price
+        if self.current_tp_price is None:
+            self.current_tp_price = self.initial_tp_price
+
+    def to_dict(self) -> dict:
+        """JSON-serializable snapshot for DB persistence."""
+        return {
+            "id": self.id,
+            "instrument": self.instrument,
+            "direction": self.direction,
+            "entry_price": self.entry_price,
+            "initial_sl_price": self.initial_sl_price,
+            "initial_tp_price": self.initial_tp_price,
+            "position_size_lots": self.position_size_lots,
+            "risk_amount": self.risk_amount,
+            "rr_ratio": self.rr_ratio,
+            "mode": self.mode,
+            "current_sl_price": self.current_sl_price,
+            "current_tp_price": self.current_tp_price,
+            "status": self.status.value if isinstance(self.status, Enum) else self.status,
+            "entry_time": self.entry_time.isoformat() if self.entry_time else None,
+            "exit_time": self.exit_time.isoformat() if self.exit_time else None,
+            "exit_price": self.exit_price,
+            "partial_close_triggered": self.partial_close_triggered,
+            "partial_close_size": self.partial_close_size,
+            "breakeven_triggered": self.breakeven_triggered,
+            "trailing_high_low": self.trailing_high_low,
+            "unrealized_pnl": self.unrealized_pnl,
+            "realized_pnl": self.realized_pnl,
+            "max_favorable_pnl": self.max_favorable_pnl,
+            "max_adverse_pnl": self.max_adverse_pnl,
+            "setup_type": self.setup_type,
+            "timeframe": self.timeframe,
+            "session": self.session,
+            "journal_entry_id": self.journal_entry_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Position":
+        """Rebuild a Position from a snapshot dict."""
+        def _dt(value):
+            if not value:
+                return None
+            try:
+                parsed = datetime.fromisoformat(value)
+                return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                return None
+
+        status = data.get("status", TradeStatus.OPEN)
+        if isinstance(status, str):
+            try:
+                status = TradeStatus(status)
+            except ValueError:
+                status = TradeStatus.OPEN
+        pos: "Position" = cls(
+            id=data["id"],
+            instrument=data.get("instrument", "EURUSD"),
+            direction=data.get("direction", "buy"),
+            entry_price=float(data.get("entry_price", 0)),
+            initial_sl_price=float(data.get("initial_sl_price", 0)),
+            initial_tp_price=float(data.get("initial_tp_price", 0)),
+            position_size_lots=float(data.get("position_size_lots", 0)),
+            risk_amount=float(data.get("risk_amount", 0)),
+            rr_ratio=float(data.get("rr_ratio", 0)),
+            mode=data.get("mode", "fixed_tp"),
+            current_sl_price=data.get("current_sl_price"),
+            current_tp_price=data.get("current_tp_price"),
+            status=status,
+            entry_time=_dt(data.get("entry_time")) or datetime.now(timezone.utc),
+            exit_time=_dt(data.get("exit_time")),
+            exit_price=data.get("exit_price"),
+            partial_close_triggered=bool(data.get("partial_close_triggered", False)),
+            partial_close_size=float(data.get("partial_close_size", 0)),
+            breakeven_triggered=bool(data.get("breakeven_triggered", False)),
+            trailing_high_low=data.get("trailing_high_low"),
+            unrealized_pnl=float(data.get("unrealized_pnl", 0)),
+            realized_pnl=float(data.get("realized_pnl", 0)),
+            max_favorable_pnl=float(data.get("max_favorable_pnl", 0)),
+            max_adverse_pnl=float(data.get("max_adverse_pnl", 0)),
+            setup_type=data.get("setup_type", ""),
+            timeframe=data.get("timeframe", ""),
+            session=data.get("session", ""),
+            journal_entry_id=data.get("journal_entry_id", ""),
+        )
+        return pos
 
 
 @dataclass
@@ -636,6 +722,36 @@ class PositionManager:
     def get_position_count(self) -> int:
         """Get count of active positions."""
         return len(self.positions)
+
+    def save_state(self) -> None:
+        """Persist open positions to DB for recovery after restart."""
+        try:
+            from . import storage
+            snapshots = [p.to_dict() for p in self.positions.values()]
+            storage.set_engine_state("ict_positions", json.dumps(snapshots))
+        except Exception as exc:
+            logger.warning("Failed to save ICT positions: %s", exc)
+
+    def load_state(self) -> None:
+        """Restore open positions from DB (best-effort)."""
+        try:
+            from . import storage
+            raw = storage.get_engine_state("ict_positions")
+            if not raw:
+                return
+            restored = 0
+            for data in json.loads(raw):
+                try:
+                    pos = Position.from_dict(data)
+                    if pos.status in (TradeStatus.OPEN, TradeStatus.PARTIALLY_CLOSED):
+                        self.positions[pos.id] = pos
+                        restored += 1
+                except Exception:
+                    continue
+            if restored:
+                logger.info("Restored %d ICT position(s) from DB", restored)
+        except Exception as exc:
+            logger.warning("Failed to restore ICT positions: %s", exc)
 
 
 # ============================================================

@@ -43,22 +43,30 @@ class SessionFilter:
         # Session traverse minuit (ex: 22:00 - 02:00)
         return current >= start or current <= end
     
+    # Priority order: narrowest/most significant sessions first, so that
+    # "overlap" (13-17) is not shadowed by "london"/"new_york" and "london"
+    # wins over "asian" on 08:00-09:00 (both match, only london is enabled).
+    _SESSION_PRIORITY: tuple = ("overlap", "london", "new_york", "asian")
+
     def get_current_session(self, now: datetime | None = None) -> SessionName | None:
         """
         Retourne la session active actuellement.
-        
+
         Returns:
             Nom de la session ou None si hors session
         """
         now = now or datetime.now(timezone.utc)
         current_time = now.time()
-        
-        for session_name, session_data in self.sessions.items():
+
+        ordered = [s for s in self._SESSION_PRIORITY if s in self.sessions]
+        ordered += [s for s in self.sessions if s not in ordered]
+        for session_name in ordered:
+            session_data = self.sessions[session_name]
             start = self._parse_time(session_data["open"])
             end = self._parse_time(session_data["close"])
             if self._is_time_in_range(current_time, start, end):
                 return session_name  # type: ignore
-        
+
         return None
     
     def is_session_active(
