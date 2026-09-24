@@ -568,9 +568,18 @@ default_signal_generator = ICTSignalGenerator("EURUSD")
 
 
 def _swing_prices(points: List) -> List[float]:
-    """Extract prices from swing points (dicts {"price": ...} or raw numbers)."""
-    if not points:
-        return []
-    if isinstance(points[0], dict):
-        return [float(p.get("price", 0)) for p in points]
-    return [float(p) for p in points]
+    """Extract prices from swing points (dicts {"price": ...} or raw numbers).
+
+    Entries without a usable price are dropped (never injected as 0.0,
+    which would corrupt min/max levels and SL placement).
+    """
+    prices: List[float] = []
+    for p in points or []:
+        raw = p.get("price") if isinstance(p, dict) else p
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            prices.append(value)
+    return prices

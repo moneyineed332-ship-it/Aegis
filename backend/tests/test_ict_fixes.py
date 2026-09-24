@@ -180,15 +180,21 @@ class TestSessionPriority:
 
 
 class TestRevengeExpiry:
+    def _check(self, rm):
+        from unittest.mock import patch as _patch
+        with _patch("app.ict_risk_manager.is_trading_allowed", return_value=True), \
+             _patch("app.ict_risk_manager.is_news_blocking", return_value=False):
+            return rm.check_all_limits(
+                instrument="EURUSD", entry_price=1.10, sl_price=1.09,
+                tp_price=1.12, direction="buy",
+            )
+
     def test_expired_block_clears(self):
         from app.ict_risk_manager import IctRiskManager
         rm = IctRiskManager(initial_capital=50.0)
         rm._revenge_trading_blocked = True
         rm._revenge_blocked_at = datetime.now(timezone.utc) - timedelta(hours=5)
-        status = rm.check_all_limits(
-            instrument="EURUSD", entry_price=1.10, sl_price=1.09,
-            tp_price=1.12, direction="buy",
-        )
+        status = self._check(rm)
         assert rm._revenge_trading_blocked is False
         assert not any("Revenge" in r for r in status.blocking_reasons)
 
@@ -197,10 +203,7 @@ class TestRevengeExpiry:
         rm = IctRiskManager(initial_capital=50.0)
         rm._revenge_trading_blocked = True
         rm._revenge_blocked_at = datetime.now(timezone.utc)
-        status = rm.check_all_limits(
-            instrument="EURUSD", entry_price=1.10, sl_price=1.09,
-            tp_price=1.12, direction="buy",
-        )
+        status = self._check(rm)
         assert any("Revenge" in r for r in status.blocking_reasons)
 
 

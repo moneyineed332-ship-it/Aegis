@@ -237,6 +237,13 @@ def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
             return t2["price"] > t1["price"]
         else:  # short
             return t2["price"] < t1["price"]
+    def _pair_return(t1, t2):
+        entry = t1["price"]
+        if not entry:
+            return 0.0
+        if t1["side"] == "buy":
+            return (t2["price"] - entry) / entry
+        return (entry - t2["price"]) / entry
     wins = sum(1 for t1, t2 in completed if _is_win(t1, t2))
     ppy = _periods_per_year(interval)
     sharpe = fmean(returns) / stdev(returns) * math.sqrt(ppy) if len(returns) > 1 and stdev(returns) > 0 else 0.0
@@ -250,6 +257,9 @@ def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
         "sortino_ratio": sortino,
         "trade_count": len(completed),
         "win_rate": round(wins / len(completed), 6) if completed else 0.0,
+        "avg_trade_return": round(
+            fmean([_pair_return(t1, t2) for t1, t2 in completed]), 6
+        ) if completed else 0.0,
     }
 
 

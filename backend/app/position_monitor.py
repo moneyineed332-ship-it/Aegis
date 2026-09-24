@@ -212,7 +212,7 @@ def monitor_cycle(prices: dict[str, float]) -> dict:
     Called by the engine task. Returns portfolio summary and any triggered alerts.
     """
     positions = storage.list_positions()
-    capital = config.PAPER_CAPITAL
+    capital = config.active_capital()
     orders = storage.list_recent_orders(limit=200)
 
     # Portfolio summary

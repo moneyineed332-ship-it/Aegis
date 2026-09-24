@@ -46,7 +46,8 @@ export function AlertWebSocketProvider({ children }: { children: ReactNode }) {
       if (!mountedRef.current || retryCountRef.current >= maxRetries) return;
       try {
         const baseUrl = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/^http/, "ws");
-        const token = localStorage.getItem("aegis_admin_token") || "";
+        const rawToken = localStorage.getItem("aegis_admin_token") || import.meta.env.VITE_ADMIN_TOKEN || "";
+        const token = rawToken.startsWith("ENC:") ? "" : rawToken;
         const wsUrl = token ? `${baseUrl}/ws/alerts?token=${token}` : `${baseUrl}/ws/alerts`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;

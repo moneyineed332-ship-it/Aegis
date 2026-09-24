@@ -260,7 +260,8 @@ class TestICTPipelineIntegration:
         with patch.object(config, "ICT_MODE", True), \
              patch("app.engine._get_ict_signal", return_value=(fake_signal, [])), \
              patch("app.engine._ict_risk_manager", IctRiskManager(initial_capital=50.0)), \
-             patch("app.ict_risk_manager.is_trading_allowed", return_value=True):
+             patch("app.ict_risk_manager.is_trading_allowed", return_value=True), \
+             patch("app.ict_risk_manager.is_news_blocking", return_value=False):
             asyncio.run(engine._run_ict_pipeline())
 
         assert "EURUSD" in engine._last_ict_signals
@@ -287,7 +288,9 @@ class TestICTPipelineIntegration:
 
         with patch.object(config, "ICT_MODE", True), \
              patch("app.engine._get_ict_signal", return_value=(fake_signal, [])), \
-             patch("app.engine._ict_risk_manager", IctRiskManager(initial_capital=50.0)):
+             patch("app.engine._ict_risk_manager", IctRiskManager(initial_capital=50.0)), \
+             patch("app.ict_risk_manager.is_trading_allowed", return_value=True), \
+             patch("app.ict_risk_manager.is_news_blocking", return_value=False):
             asyncio.run(engine._run_ict_pipeline())
 
         # Signal stored but not promoted to _last_signal (risk refused)

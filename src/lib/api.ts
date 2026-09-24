@@ -369,8 +369,15 @@ if (!apiBaseUrl) {
   throw new Error("VITE_API_URL n'est pas défini. Ajoute-le dans le fichier .env à la racine du projet.");
 }
 
-function getAdminHeaders(): Record<string, string> {
+export function getAdminToken(): string {
   const token = localStorage.getItem("aegis_admin_token") || import.meta.env.VITE_ADMIN_TOKEN || "";
+  // An ENC: blob can never authenticate from the browser (decryption key
+  // is server-side) — treat as absent so the UI shows login state, not 401s.
+  return token.startsWith("ENC:") ? "" : token;
+}
+
+function getAdminHeaders(): Record<string, string> {
+  const token = getAdminToken();
   return token ? { "X-AEGIS-Admin-Token": token } : {};
 }
 

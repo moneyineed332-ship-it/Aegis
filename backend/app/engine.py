@@ -32,6 +32,7 @@ from .indicators import atr_single, multi_timeframe_confluence, multi_scale_cros
 _ict_signal_generator = None
 _ict_risk_manager = None
 _ict_position_manager = None
+_ict_state_restored = False
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ def _save_state() -> None:
 
 def _init_ict_pipeline() -> None:
     """Initialize the ICT/SMC pipeline modules (lazy, on first use)."""
-    global _ict_signal_generator, _ict_risk_manager, _ict_position_manager
+    global _ict_signal_generator, _ict_risk_manager, _ict_position_manager, _ict_state_restored
     if not config.ICT_MODE:
         return
     try:
@@ -99,12 +100,16 @@ def _init_ict_pipeline() -> None:
         if _ict_position_manager is None:
             _ict_position_manager = PositionManager(risk_manager=_ict_risk_manager)
             logger.info("ICT Position Manager initialized")
-        # Restore persisted ICT state (best-effort)
-        try:
-            _ict_risk_manager.load_state()
-            _ict_position_manager.load_state()
-        except Exception as exc:
-            logger.warning("Failed to restore ICT state: %s", exc)
+        # Restore persisted ICT state once (not every cycle, or DB
+        # snapshots would clobber hot in-memory mutations).
+        global _ict_state_restored
+        if not _ict_state_restored:
+            try:
+                _ict_risk_manager.load_state()
+                _ict_position_manager.load_state()
+                _ict_state_restored = True
+            except Exception as exc:
+                logger.warning("Failed to restore ICT state: %s", exc)
     except Exception as exc:
         logger.error("Failed to initialize ICT pipeline: %s", exc)
 
@@ -370,6 +375,7 @@ async def _run_ict_pipeline() -> None:
                     "position_size": position_size,
                     "instrument": instrument,
                     "session": signal.session,
+                    "current_atr_pips": current_atr_pips,
                 },
                 "smc_analysis": {},
                 "mtf_analysis": None,
@@ -633,7 +639,8 @@ async def _execute_ict_trade(symbol: str, recommendation: dict, price: float) ->
         })
         return
 
-    # Final risk check (should already pass, but defensive)
+    # Final risk check (should already pass, but defensive).
+    # Reuses the signal-time ATR so the §18 volatility gate stays armed.
     if _ict_risk_manager:
         risk_status = _ict_risk_manager.check_all_limits(
             instrument=instrument,
@@ -641,6 +648,7 @@ async def _execute_ict_trade(symbol: str, recommendation: dict, price: float) ->
             sl_price=sl_price,
             tp_price=tp_price,
             direction=direction,
+            current_atr_pips=recommendation.get("current_atr_pips"),
         )
         if not risk_status.can_trade:
             storage.log_engine_event(_get_cycle_id(), "ict_trade_refused_at_exec", {
@@ -1257,7 +1265,7 @@ def get_engine_status() -> dict:
         "focused_mode": config.FOCUSED_MODE,
         "started_at": started_at,
         "cycle_count": _cycle_count,
-        "symbols": config.SYMBOLS,
+        "symbols": list(market_data.SYMBOLS),
         "last_prices": _last_prices,
         "last_analysis": {
             "symbol": _last_analysis["symbol"],

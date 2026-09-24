@@ -111,7 +111,10 @@ def _fetch_ohlcv_yahoo(symbol: str, interval: str, limit: int) -> list[dict]:
             })
         except (IndexError, TypeError, ValueError):
             continue
-    rows = rows[-limit:] if limit > 0 else rows
+    # NOTE: end_time is not supported by the Yahoo fallback (always latest).
+    # For 4h resampling keep 4x rows so the output still covers ~limit candles.
+    keep = (limit * 4 + 8) if interval == "4h" else limit
+    rows = rows[-keep:] if keep > 0 else rows
     if interval == "4h":
         # Resample 60m buckets into 4h candles.
         resampled = []

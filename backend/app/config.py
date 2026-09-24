@@ -156,6 +156,21 @@ DONCHIAN_PARAMS = {
     "exit_period": int(os.getenv("AEGIS_DONCHIAN_EXIT_PERIOD", "10")),
 }
 
+def active_capital() -> float:
+    """Trading capital for the currently active mode.
+
+    ICT forex mode trades 50 €, legacy paper mode 20 €. Read live (not a
+    constant) so tests can monkeypatch PAPER_CAPITAL / ICT_PAPER_CAPITAL.
+    """
+    return ICT_PAPER_CAPITAL if ICT_MODE else PAPER_CAPITAL
+
+
+def active_symbols() -> tuple:
+    """Tradeable universe for the currently active mode."""
+    from . import market_data as _md
+    return tuple(_md.SYMBOLS)
+
+
 # --- ICT/SMC Mode (Cahier des charges) ---
 # When enabled, the engine uses the full ICT/SMC pipeline:
 # multi-TF analysis → signal generator → risk manager → position manager.

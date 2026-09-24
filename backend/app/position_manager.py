@@ -724,11 +724,14 @@ class PositionManager:
         return len(self.positions)
 
     def save_state(self) -> None:
-        """Persist open positions to DB for recovery after restart."""
+        """Persist open positions + id counter to DB for recovery after restart."""
         try:
             from . import storage
             snapshots = [p.to_dict() for p in self.positions.values()]
-            storage.set_engine_state("ict_positions", json.dumps(snapshots))
+            storage.set_engine_state("ict_positions", json.dumps({
+                "counter": self.position_counter,
+                "positions": snapshots,
+            }))
         except Exception as exc:
             logger.warning("Failed to save ICT positions: %s", exc)
 
@@ -739,8 +742,10 @@ class PositionManager:
             raw = storage.get_engine_state("ict_positions")
             if not raw:
                 return
+            payload = json.loads(raw)
+            items = payload.get("positions", []) if isinstance(payload, dict) else payload
             restored = 0
-            for data in json.loads(raw):
+            for data in items:
                 try:
                     pos = Position.from_dict(data)
                     if pos.status in (TradeStatus.OPEN, TradeStatus.PARTIALLY_CLOSED):
@@ -748,6 +753,12 @@ class PositionManager:
                         restored += 1
                 except Exception:
                     continue
+            if isinstance(payload, dict):
+                try:
+                    self.position_counter = max(
+                        self.position_counter, int(payload.get("counter", 0)))
+                except (TypeError, ValueError):
+                    pass
             if restored:
                 logger.info("Restored %d ICT position(s) from DB", restored)
         except Exception as exc:

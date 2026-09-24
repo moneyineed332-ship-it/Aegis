@@ -34,11 +34,12 @@ def _market_prices() -> dict:
 def portfolio_equity(capital: float | None = None) -> float:
     """Capital + unrealized PnL valued at last market prices.
 
+    Defaults to the active mode capital (ICT 50 € / paper 20 €).
     Falls back to entry price per position when no snapshot exists,
     so equity is never worse than cost basis in that case.
     """
     from . import position_monitor
-    cap = capital if capital is not None else config.PAPER_CAPITAL
+    cap = capital if capital is not None else config.active_capital()
     try:
         summary = position_monitor.compute_portfolio_summary(
             storage.list_positions(), _market_prices(), cap
@@ -191,7 +192,7 @@ def status(kill_switch_active: bool) -> dict:
     # Position count
     positions = storage.list_positions()
     total_exposure = sum(abs(p["quantity"] * p["average_price"]) for p in positions)
-    capital = config.PAPER_CAPITAL
+    capital = config.active_capital()
     equity = portfolio_equity(capital)
 
     return {
@@ -285,7 +286,7 @@ def flatten_all_positions(reason: str = "manual") -> list[dict]:
 def get_system_summary() -> dict:
     """Get a summary of the full system state for the dashboard."""
     positions = storage.list_positions()
-    capital = config.PAPER_CAPITAL
+    capital = config.active_capital()
     equity = portfolio_equity(capital)
     exposure = sum(abs(p["quantity"] * p["average_price"]) for p in positions)
 
@@ -313,5 +314,5 @@ def get_system_summary() -> dict:
             "position_count": len([p for p in positions if p["quantity"] != 0]),
         },
         "recent_trades": len(recent_orders),
-        "symbols_tracked": len(config.SYMBOLS),
+        "symbols_tracked": len(config.active_symbols()),
     }

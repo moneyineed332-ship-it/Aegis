@@ -503,7 +503,7 @@ def risk_check_circuit() -> dict:
     """Check circuit breaker status (equity valued at market prices)."""
     try:
         from . import risk, supervisor
-        capital = config.PAPER_CAPITAL
+        capital = config.active_capital()
         equity = supervisor.portfolio_equity(capital)
         return risk.check_circuit_breaker(capital, equity)
     except Exception:

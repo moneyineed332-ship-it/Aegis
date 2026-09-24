@@ -353,7 +353,13 @@ class IctRiskManager:
             # Le blocage expire après le cooldown (sinon blocage définitif).
             if self._revenge_trading_blocked:
                 blocked_at = self._revenge_blocked_at
-                if blocked_at is not None:
+                if blocked_at is None:
+                    # Legacy state (pré-timestamp) : considéré comme expiré.
+                    self._revenge_trading_blocked = False
+                    logger.warning("Blocage revenge sans timestamp — levé (état legacy)")
+                else:
+                    if blocked_at.tzinfo is None:
+                        blocked_at = blocked_at.replace(tzinfo=timezone.utc)
                     from datetime import timedelta
                     elapsed_h = (datetime.now(timezone.utc) - blocked_at).total_seconds() / 3600
                     if elapsed_h >= REVENGE_BLOCK_COOLDOWN_HOURS:
@@ -729,7 +735,16 @@ class IctRiskManager:
             self._locked_position_size = state.get("locked_position_size", {}) or {}
             self._revenge_trading_blocked = bool(state.get("revenge_trading_blocked", False))
             blocked_at = state.get("revenge_blocked_at")
-            self._revenge_blocked_at = _dt.fromisoformat(blocked_at) if blocked_at else None
+            parsed_at = None
+            if blocked_at:
+                try:
+                    parsed_at = _dt.fromisoformat(blocked_at)
+                    if parsed_at.tzinfo is None:
+                        from datetime import timezone as _tz
+                        parsed_at = parsed_at.replace(tzinfo=_tz.utc)
+                except (ValueError, TypeError):
+                    parsed_at = None
+            self._revenge_blocked_at = parsed_at
             self._last_loss_amount = float(state.get("last_loss_amount", 0.0))
             self._current_position_size_multiplier = float(
                 state.get("position_size_multiplier", 1.0))

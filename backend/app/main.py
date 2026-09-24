@@ -13,6 +13,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, We
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
@@ -67,6 +68,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AEGIS AI Quant", version="0.2.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 
 @app.get("/health")
@@ -122,7 +124,7 @@ except ImportError as e:
     logger.warning(f"Could not initialize ICT Dashboard router: {e}")
 
 # Utiliser le capital ICT/SMC si configuré, sinon capital standard
-INITIAL_CAPITAL = config.ICT_PAPER_CAPITAL
+INITIAL_CAPITAL = config.active_capital()
 MAX_ORDER_NOTIONAL = config.MAX_ORDER_NOTIONAL
 MAX_TOTAL_EXPOSURE = config.MAX_TOTAL_EXPOSURE
 
@@ -199,10 +201,10 @@ def dashboard() -> dict:
             stress_test_data = risk.stress_test(candles, INITIAL_CAPITAL, btc_position_value)
         except (ValueError, Exception):
             pass
-        # Correlation across all symbols
+        # Correlation across the active universe
         try:
             assets = {}
-            for sym in (config.FOCUSED_SYMBOLS if config.FOCUSED_MODE else ("BTCUSDT", "ETHUSDT", "SOLUSDT")):
+            for sym in market_data.SYMBOLS:
                 sym_candles = storage.list_ohlcv_candles(sym, "1h", limit=200)
                 if sym_candles:
                     assets[sym] = [c["close"] for c in sym_candles]
@@ -390,13 +392,21 @@ def strategies() -> list[dict]:
 
 @app.get("/api/v1/focus/status")
 def focus_status() -> dict:
-    """Phase 1 focused-mode summary: single strategy, limited symbols, max deals."""
+    """Active-mode summary: focused single-strategy or ICT/SMC forex."""
+    ict_mode = config.ICT_MODE and not config.FOCUSED_MODE
+    symbols = (
+        config.FOCUSED_SYMBOLS
+        if config.FOCUSED_MODE
+        else (config.ICT_SYMBOLS if ict_mode else config.SYMBOLS)
+    )
+    strategy = config.FOCUSED_STRATEGY if config.FOCUSED_MODE else "ict_smc"
     return {
         "focused_mode": config.FOCUSED_MODE,
-        "strategy": config.FOCUSED_STRATEGY,
-        "strategy_name": strategy_registry.get_strategy(config.FOCUSED_STRATEGY).get("name", config.FOCUSED_STRATEGY)
-        if strategy_registry.get_strategy(config.FOCUSED_STRATEGY) else config.FOCUSED_STRATEGY,
-        "symbols": config.FOCUSED_SYMBOLS,
+        "ict_mode": ict_mode,
+        "strategy": strategy,
+        "strategy_name": strategy_registry.get_strategy(strategy).get("name", strategy)
+        if strategy_registry.get_strategy(strategy) else strategy,
+        "symbols": symbols,
         "max_positions": config.MAX_POSITIONS,
         "donchian_parameters": config.DONCHIAN_PARAMS,
         "mode": config.MODE,
@@ -535,8 +545,8 @@ def execute_fractioned_order(
     request: Request,
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     side: Literal["buy", "sell"] = "buy",
-    quantity: float = 0.01,
-    chunks: int = 3,
+    quantity: float = Query(default=0.01, gt=0, le=10),
+    chunks: int = Query(default=3, ge=1, le=10),
     _admin: None = Depends(require_admin_token),
 ) -> dict:
     if storage.get_kill_switch():
@@ -743,9 +753,8 @@ def update_alert_thresholds(thresholds: dict, _admin: None = Depends(require_adm
 @app.post("/api/v1/alerts/check")
 async def check_alerts(_admin: None = Depends(require_admin_token)) -> dict:
     """Manually trigger alert checks on current data and broadcast to WS clients."""
-    from . import config as _cfg
     all_alerts = []
-    for symbol in _cfg.SYMBOLS:
+    for symbol in market_data.SYMBOLS:
         candles = storage.list_ohlcv_candles(symbol, "1h", limit=200)
         if len(candles) < 50:
             continue
@@ -1079,6 +1088,7 @@ def monte_carlo(
     fast_period: int = 10,
     slow_period: int = 30,
     n_simulations: int = Query(default=1000, ge=10, le=5000),
+    seed: int | None = None,
     _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
@@ -1093,6 +1103,7 @@ def monte_carlo(
     }
     result = backtesting_advanced.monte_carlo_simulation(
         candles, backtesting.run_sma_crossover, params, n_simulations,
+        seed=seed,
     )
     result["symbol"] = symbol
     result["interval"] = interval

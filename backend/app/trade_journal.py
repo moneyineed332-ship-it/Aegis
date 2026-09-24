@@ -324,6 +324,7 @@ class TradeJournal:
         self.entries: List[TradeJournalEntry] = []
         self.rejected_entries: List[TradeJournalEntry] = []
         self._entry_counter = 0
+        self._persisted_trade_ids: set = set()
     
     def add_trade_entry(
         self,
@@ -529,7 +530,12 @@ class TradeJournal:
         return None
 
     def _persist_closed_trade(self, entry: "TradeJournalEntry") -> None:
-        """Persist a closed trade to the SQL journal (survives restarts)."""
+        """Persist a closed trade to the SQL journal (survives restarts).
+
+        Idempotent per trade_id: a second close event never duplicates rows.
+        """
+        if entry.trade_id in self._persisted_trade_ids:
+            return
         try:
             from . import storage
             date = entry.date.isoformat() if hasattr(entry.date, "isoformat") else str(entry.date)
@@ -549,6 +555,7 @@ class TradeJournal:
                 pnl=float(entry.pnl or 0),
                 notes=entry.notes or "",
             )
+            self._persisted_trade_ids.add(entry.trade_id)
         except Exception as exc:
             logger.warning(f"Failed to persist journal entry {entry.trade_id}: {exc}")
     
