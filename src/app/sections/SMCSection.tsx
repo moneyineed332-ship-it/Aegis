@@ -3,6 +3,8 @@ import { runSmcIctBacktest, runMultiTimeframeBacktest, runMultiScaleCrossoverBac
 import { Skeleton } from "../components/ui";
 import { TrendingUp, TrendingDown, Minus, Target, Shield, Zap, Layers, RefreshCw } from "lucide-react";
 
+type IctSymbol = "EURUSD" | "GBPUSD" | "XAUUSD" | "PAXGUSDT" | "BTCUSDT" | "ETHUSDT" | "SOLUSDT";
+
 interface BacktestResult {
   strategy: string;
   final_equity: number;
@@ -22,7 +24,7 @@ export default function SMCSection() {
   const [mscResult, setMscResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [symbol, setSymbol] = useState<"BTCUSDT" | "ETHUSDT" | "SOLUSDT">("BTCUSDT");
+  const [symbol, setSymbol] = useState<IctSymbol>("EURUSD");
   const [interval, setInterval] = useState<"1h" | "4h">("1h");
 
   const handleSmcIct = async () => {
@@ -154,9 +156,13 @@ export default function SMCSection() {
           <div className="flex gap-1.5 sm:gap-2">
             <select
               value={symbol}
-              onChange={(e) => setSymbol(e.target.value as "BTCUSDT" | "ETHUSDT" | "SOLUSDT")}
+              onChange={(e) => setSymbol(e.target.value as IctSymbol)}
               className="px-3 py-1.5 font-['JetBrains_Mono'] text-[12px] sm:text-xs border border-primary/30 text-primary bg-transparent"
             >
+              <option value="EURUSD">EURUSD</option>
+              <option value="GBPUSD">GBPUSD</option>
+              <option value="XAUUSD">XAUUSD</option>
+              <option value="PAXGUSDT">PAXGUSDT</option>
               <option value="BTCUSDT">BTCUSDT</option>
               <option value="ETHUSDT">ETHUSDT</option>
               <option value="SOLUSDT">SOLUSDT</option>

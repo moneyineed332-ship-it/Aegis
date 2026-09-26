@@ -62,11 +62,11 @@ export default function RiskSection() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="rounded-lg p-3 border border-border/50" style={{ background: "rgba(0,212,255,0.03)" }}>
                   <div className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground/60 mb-1">VALUE AT RISK (95%)</div>
-                  <div className="font-['Rajdhani'] font-bold text-xl text-foreground">{(risk.value_at_risk * 100).toFixed(2)}%</div>
+                  <div className="font-['Rajdhani'] font-bold text-xl text-foreground">${risk.value_at_risk.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}</div>
                 </div>
                 <div className="rounded-lg p-3 border border-border/50" style={{ background: "rgba(0,87,255,0.03)" }}>
                   <div className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground/60 mb-1">CVaR (95%)</div>
-                  <div className="font-['Rajdhani'] font-bold text-xl text-foreground">{(risk.conditional_value_at_risk * 100).toFixed(2)}%</div>
+                  <div className="font-['Rajdhani'] font-bold text-xl text-foreground">${risk.conditional_value_at_risk.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}</div>
                 </div>
                 <div className="rounded-lg p-3 border border-border/50" style={{ background: "rgba(0,255,136,0.03)" }}>
                   <div className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground/60 mb-1">VOLATILITÉ ANN.</div>
@@ -74,7 +74,8 @@ export default function RiskSection() {
                 </div>
                 <div className="rounded-lg p-3 border border-border/50" style={{ background: "rgba(255,51,102,0.03)" }}>
                   <div className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground/60 mb-1">MAX DRAWDOWN</div>
-                  <div className="font-['Rajdhani'] font-bold text-xl text-red-400">{(risk.max_drawdown_pct * 100).toFixed(2)}%</div>
+                  {/* max_drawdown_pct is already expressed in percent by the API. */}
+                  <div className="font-['Rajdhani'] font-bold text-xl text-red-400">{risk.max_drawdown_pct.toFixed(2)}%</div>
                 </div>
               </div>
             ) : (

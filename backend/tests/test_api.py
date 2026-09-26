@@ -5,6 +5,8 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import pytest
+
 from app import storage
 
 from fastapi.testclient import TestClient
@@ -96,6 +98,30 @@ def test_protected_posts_require_auth(client):
         assert r.status_code == 401, path
     r = client.get("/api/v1/free/all")
     assert r.status_code == 401
+
+
+# === Admin token verification (used by the dashboard login screen) ===
+
+def test_auth_verify_requires_token(client):
+    assert client.get("/api/v1/auth/verify").status_code == 401
+
+
+def test_auth_verify_accepts_valid_token(client, admin_headers):
+    r = client.get("/api/v1/auth/verify", headers=admin_headers)
+    assert r.status_code == 200
+    assert r.json()["authenticated"] is True
+
+
+def test_non_ascii_token_returns_401_not_500():
+    """compare_digest() raises on non-ASCII str input, which surfaced as a 500."""
+    from fastapi import HTTPException
+    from app.deps import require_admin_token
+
+    for bad in ("tökén-échec", "токен", "1234"):
+        with pytest.raises(HTTPException) as exc:
+            require_admin_token(bad)
+        assert exc.value.status_code == 401
+        assert "required" in exc.value.detail
 
 
 # === Market Snapshots ===
@@ -631,6 +657,139 @@ def test_cancel_open_order(client, admin_headers):
     assert r2.json()["status"] == "cancelled"
     r3 = client.get("/api/v1/orders/open")
     assert r3.json()["count"] == 0
+
+
+# === Kill switch must block EVERY order entry point ===
+#
+# /api/v1/execution/limit-order used to call the raw simulator directly, so it
+# honoured no kill switch, no notional limit, no exposure limit, and persisted
+# neither the fill nor the pending order.
+
+ORDER_ENTRY_POINTS = [
+    ("/api/v1/execution/limit-order", {"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002, "limit_price": 50000}),
+    ("/api/v1/execution/market-order", {"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002}),
+    ("/api/v1/execution/fractioned-order", {"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002, "chunks": 2}),
+    ("/api/v1/paper-orders", {"symbol": "BTC/USDT", "side": "buy", "quantity": 0.0002, "reference_price": 50000}),
+    ("/api/v1/orders/manual", {"symbol": "BTC/USDT", "side": "buy", "order_type": "market", "quantity": 0.0002}),
+    ("/api/v1/orders/manual", {"symbol": "BTC/USDT", "side": "buy", "order_type": "limit", "quantity": 0.0002, "limit_price": 50000}),
+]
+
+
+def test_kill_switch_blocks_every_order_endpoint(client, admin_headers):
+    storage.save_market_snapshots([{"symbol": "BTC/USDT", "price": 50000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 50000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    storage.set_kill_switch(True, "regression test")
+    try:
+        for path, payload in ORDER_ENTRY_POINTS:
+            r = client.post(path, params=payload, json=payload, headers=admin_headers)
+            assert r.status_code == 423, f"{path} accepted an order while the kill switch was active"
+    finally:
+        storage.set_kill_switch(False, "regression cleanup")
+
+
+def test_kill_switch_blocks_limit_order_specifically(client, admin_headers):
+    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 50000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    storage.set_kill_switch(True, "regression test")
+    try:
+        r = client.post(
+            "/api/v1/execution/limit-order",
+            params={"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002, "limit_price": 40000},
+            headers=admin_headers,
+        )
+        assert r.status_code == 423
+    finally:
+        storage.set_kill_switch(False, "regression cleanup")
+
+
+def test_kill_switch_does_not_persist_a_pending_order(client, admin_headers):
+    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 65000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    storage.set_kill_switch(True, "regression test")
+    try:
+        client.post(
+            "/api/v1/execution/limit-order",
+            params={"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002, "limit_price": 50000},
+            headers=admin_headers,
+        )
+        assert client.get("/api/v1/orders/open").json()["count"] == 0
+    finally:
+        storage.set_kill_switch(False, "regression cleanup")
+
+
+# === Oversized orders are rejected BEFORE any fill is simulated or booked ===
+
+def test_limit_order_respects_max_notional(client, admin_headers):
+    """Before the fix this endpoint had no notional check at all."""
+    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 50000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    before = len(storage.list_positions())
+    r = client.post(
+        "/api/v1/execution/limit-order",
+        params={"symbol": "BTCUSDT", "side": "buy", "quantity": 10, "limit_price": 40000},
+        headers=admin_headers,
+    )
+    assert r.status_code == 422
+    assert len(storage.list_positions()) == before, "a rejected order still moved the book"
+
+
+def test_market_order_rejects_before_simulating(client, admin_headers):
+    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 50000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    before = len(storage.list_positions())
+    r = client.post(
+        "/api/v1/execution/market-order",
+        params={"symbol": "BTCUSDT", "side": "buy", "quantity": 10},
+        headers=admin_headers,
+    )
+    assert r.status_code == 422
+    assert len(storage.list_positions()) == before
+
+
+def test_fractioned_order_rejects_before_chunking(client, admin_headers):
+    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 50000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    before = len(storage.list_positions())
+    r = client.post(
+        "/api/v1/execution/fractioned-order",
+        params={"symbol": "BTCUSDT", "side": "buy", "quantity": 5, "chunks": 3},
+        headers=admin_headers,
+    )
+    assert r.status_code == 422
+    assert len(storage.list_positions()) == before
+
+
+def test_limit_order_now_persists_a_fill(client, admin_headers):
+    """The endpoint used to return a fill without recording anything."""
+    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 50000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    r = client.post(
+        "/api/v1/execution/limit-order",
+        params={"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002, "limit_price": 60000},
+        headers=admin_headers,
+    )
+    assert r.status_code == 201
+    assert r.json()["status"] == "filled"
+    positions = storage.list_positions()
+    btc = next((p for p in positions if p["symbol"] == "BTCUSDT"), None)
+    assert btc is not None, "a filled limit order left no position"
+    assert btc["average_price"] == 60000
+
+
+def test_limit_order_persists_a_pending_order(client, admin_headers):
+    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 65000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    r = client.post(
+        "/api/v1/execution/limit-order",
+        params={"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002, "limit_price": 50000},
+        headers=admin_headers,
+    )
+    assert r.status_code == 201
+    assert r.json()["status"] == "pending"
+    assert client.get("/api/v1/orders/open").json()["count"] >= 1
+
+
+def test_limit_order_rejects_non_positive_quantity(client, admin_headers):
+    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 50000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    r = client.post(
+        "/api/v1/execution/limit-order",
+        params={"symbol": "BTCUSDT", "side": "buy", "quantity": 0, "limit_price": 50000},
+        headers=admin_headers,
+    )
+    assert r.status_code == 422
 
 
 if False:  # Manual __main__ runner disabled — use pytest instead

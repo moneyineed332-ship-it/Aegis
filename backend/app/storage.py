@@ -296,6 +296,12 @@ def initialize() -> None:
         )
         # --- Migration: add missing columns to existing tables ---
         _migrate_paper_orders(db)
+        # Seed the kill switch so its absence can be treated as a fault below
+        # rather than as "trading allowed".
+        db.execute(
+            "INSERT OR IGNORE INTO system_controls (name, value, updated_at) VALUES ('kill_switch', 'inactive', ?)",
+            (datetime.now(timezone.utc).isoformat(),),
+        )
         _initialized = True
         logger.info("Database initialized with WAL mode")
 
@@ -331,8 +337,15 @@ def list_positions() -> list[dict]:
 
 
 def cleanup_stale_positions() -> int:
-    """Remove positions with invalid prices (e.g. $75 for BTC) or non-normalized symbols."""
+    """Remove positions with non-normalized symbols or non-positive prices.
+
+    A low price is NOT by itself corruption: EURUSD (~1.08), DOGE and SHIB all
+    trade below 1. Only impossible values (price <= 0) are dropped, so a boot
+    can never silently delete a legitimate Forex or micro-cap holding. Prices
+    that look implausible for a given symbol are only logged for review.
+    """
     stale_symbols = []
+    suspicious = []
     with connection() as database:
         rows = database.execute("SELECT symbol, average_price FROM positions").fetchall()
         for row in rows:
@@ -341,12 +354,37 @@ def cleanup_stale_positions() -> int:
             normalized = normalize_symbol(symbol)
             if symbol != normalized:
                 stale_symbols.append(symbol)
-            elif price < 1 and price != 0:
+            elif price is None or price <= 0:
                 stale_symbols.append(symbol)
+            else:
+                implausible = _implausible_price(symbol, price)
+                if implausible:
+                    suspicious.append(f"{symbol} @ {price}")
         for sym in stale_symbols:
             database.execute("DELETE FROM positions WHERE symbol = ?", (sym,))
             logger.warning("Removed stale position: %s", sym)
+        for item in suspicious:
+            logger.warning("Position price looks implausible, kept for review: %s", item)
     return len(stale_symbols)
+
+
+# Rough order-of-magnitude sanity bands, used for logging only.
+_PRICE_BANDS = {
+    "BTC": (1_000.0, 1_000_000.0),
+    "ETH": (50.0, 100_000.0),
+    "XAU": (100.0, 10_000.0),
+    "EUR": (0.5, 3.0),
+    "GBP": (0.5, 3.0),
+}
+
+
+def _implausible_price(symbol: str, price: float) -> bool:
+    """Return True when a price is far outside the expected range for a symbol."""
+    normalized = normalize_symbol(symbol).upper()
+    for prefix, (low, high) in _PRICE_BANDS.items():
+        if normalized.startswith(prefix):
+            return not (low <= price <= high)
+    return False
 
 
 def list_recent_orders(limit: int = 10) -> list[dict]:
@@ -541,9 +579,22 @@ def list_recent_decisions(limit: int = 20) -> list[dict]:
 
 
 def get_kill_switch() -> bool:
-    with connection() as database:
-        row = database.execute("SELECT value FROM system_controls WHERE name = 'kill_switch'").fetchone()
-        return row is not None and row["value"] == "active"
+    """Read the kill switch, failing closed.
+
+    A missing row or a storage error means the state of the switch is unknown,
+    so it is reported as ACTIVE: a read fault must never silently re-enable
+    trading. The row is seeded as "inactive" at database init.
+    """
+    try:
+        with connection() as database:
+            row = database.execute("SELECT value FROM system_controls WHERE name = 'kill_switch'").fetchone()
+        if row is None:
+            logger.error("Kill switch row missing: failing closed (trading halted)")
+            return True
+        return row["value"] == "active"
+    except Exception:
+        logger.error("Kill switch read failed: failing closed (trading halted)", exc_info=True)
+        return True
 
 
 def set_kill_switch(active: bool, message: str) -> None:
@@ -558,55 +609,152 @@ def list_alerts(limit: int = 50) -> list[dict]:
         return [dict(row) for row in database.execute("SELECT * FROM system_alerts ORDER BY id DESC LIMIT ?", (limit,))]
 
 
+# Cap on the number of orders replayed to rebuild the equity curve, so a
+# long-lived database cannot turn a dashboard call into a full table scan.
+_EQUITY_CURVE_MAX_ORDERS = 5_000
+
+
 def compute_equity_curve(initial_capital: float, positions: list[dict], orders: list[dict], prices: dict[str, float] | None = None) -> list[dict]:
-    """Compute equity curve for dashboard display.
+    """Rebuild the equity curve from the order history.
 
-    Priority:
-    1. If orders exist, build from order history + position valuation
-    2. Otherwise, build from engine_log position_update events (real-time equity snapshots)
-    3. Fallback: single point at initial_capital
+    Equity is ``initial_capital + realized_pnl - fees + unrealized_pnl``.
+    Orders are replayed with per-symbol netting so that a closing trade books
+    the real gain or loss instead of the traded notional, and fees are always
+    charged. Mark prices come from ``prices`` and fall back to the basis
+    established by the replay, which makes the unrealized term explicit
+    instead of silently zero.
+
+    Falls back to the recorded equity snapshots in ``engine_log`` when no
+    order history exists.
     """
-    if orders:
-        sorted_orders = sorted(orders, key=lambda o: o["id"])
-        equity = initial_capital
-        start_time = sorted_orders[0]["created_at"]
-        curve = [{"time": start_time, "equity": initial_capital}]
-        for order in sorted_orders:
-            if order["side"] == "buy":
-                equity -= order["notional"]
-            else:
-                equity += order["notional"]
-            curve.append({"time": order["created_at"], "equity": round(equity, 2)})
-        for pos in positions:
-            price = (prices or {}).get(pos["symbol"], pos["average_price"])
-            equity += pos["quantity"] * price
-        from datetime import datetime, timezone
-        curve.append({"time": datetime.now(timezone.utc).isoformat(), "equity": round(equity, 2)})
-        return curve[-20:]
+    from datetime import datetime, timezone
 
+    if not orders:
+        return _equity_curve_from_logs(initial_capital)
+
+    # The order id is the replay cursor, so work oldest-first.
+    sorted_orders = sorted(orders, key=lambda o: o["id"])
+    if len(sorted_orders) > _EQUITY_CURVE_MAX_ORDERS:
+        logger.warning(
+            "Equity curve truncated to the last %d orders (got %d)",
+            _EQUITY_CURVE_MAX_ORDERS, len(sorted_orders),
+        )
+        sorted_orders = sorted_orders[-_EQUITY_CURVE_MAX_ORDERS:]
+
+    # Replay state: net quantity and cost basis per symbol.
+    quantity: dict[str, float] = {}
+    basis: dict[str, float] = {}
+    last_price: dict[str, float] = {}
+    realized = 0.0
+
+    start_time = sorted_orders[0]["created_at"]
+    curve = [{"time": start_time, "equity": round(initial_capital, 2)}]
+
+    for order in sorted_orders:
+        symbol = order["symbol"]
+        price = order.get("fill_price") or order.get("reference_price")
+        if not price:
+            # Cannot net a trade without a price; skip rather than corrupt the curve.
+            logger.warning("Equity curve skipped order %s: no fill price", order.get("id"))
+            continue
+        signed = order["quantity"] if order["side"] == "buy" else -order["quantity"]
+        held = quantity.get(symbol, 0.0)
+
+        if held == 0:
+            quantity[symbol] = signed
+            basis[symbol] = price
+        elif (held > 0) == (signed > 0):
+            # Adding to the position: weighted average cost basis.
+            total_cost = abs(basis[symbol] * held) + abs(price * signed)
+            quantity[symbol] = held + signed
+            basis[symbol] = total_cost / abs(quantity[symbol])
+        else:
+            # Reducing or flipping: book the realized result on the closed part.
+            closed = min(abs(signed), abs(held))
+            direction = 1.0 if held > 0 else -1.0
+            realized += (price - basis[symbol]) * closed * direction
+            new_qty = held + signed
+            if new_qty == 0:
+                quantity.pop(symbol, None)
+                basis.pop(symbol, None)
+            elif (new_qty > 0) != (held > 0):
+                # Flipped direction: the residual is a fresh position.
+                quantity[symbol] = new_qty
+                basis[symbol] = price
+            else:
+                # Partial close: quantity shrinks, the basis is untouched.
+                quantity[symbol] = new_qty
+
+        # Fees are a realized cost whatever the direction.
+        realized -= float(order.get("fee") or 0.0)
+        last_price[symbol] = price
+
+        # Historical points are marked with the price known at that point in
+        # the replay. Using today's mark here would retroactively rewrite the
+        # whole curve.
+        equity = initial_capital + realized + _unrealized_from_state(quantity, basis, None, last_price)
+        curve.append({"time": order["created_at"], "equity": round(equity, 2)})
+
+    final_equity = initial_capital + realized + _unrealized_from_state(quantity, basis, prices, last_price)
+    curve.append({
+        "time": datetime.now(timezone.utc).isoformat(),
+        "equity": round(final_equity, 2),
+    })
+    return curve[-100:]
+
+
+def _unrealized_from_state(
+    quantity: dict[str, float],
+    basis: dict[str, float],
+    prices: dict[str, float] | None,
+    last_price: dict[str, float],
+) -> float:
+    """Mark-to-market value of the replayed open positions.
+
+    ``prices`` holds live marks and is used for the current point only; the
+    historical points fall back to the last traded price of each symbol.
+    """
+    marks = prices or {}
+    total = 0.0
+    for symbol, qty in quantity.items():
+        if qty == 0:
+            continue
+        mark = marks.get(symbol) or last_price.get(symbol) or basis.get(symbol)
+        if mark is None:
+            continue
+        total += (mark - basis[symbol]) * qty
+    return total
+
+
+def _equity_curve_from_logs(initial_capital: float) -> list[dict]:
+    """Rebuild the curve from recorded equity snapshots, newest first."""
     with connection() as database:
         rows = database.execute(
-            "SELECT created_at, details_json FROM engine_log WHERE event_type = 'position_update' ORDER BY id ASC"
-        )
-        curve: list[dict] = []
-        seen_times: set[str] = set()
-        for row in rows:
-            details = json.loads(row["details_json"])
-            eq = details.get("equity")
-            if eq is None:
-                continue
-            ts = row["created_at"]
-            minute_key = ts[:16]
-            if minute_key in seen_times:
-                continue
-            seen_times.add(minute_key)
-            curve.append({"time": ts, "equity": round(eq, 2)})
+            "SELECT created_at, details_json FROM engine_log "
+            "WHERE event_type = 'position_update' ORDER BY id DESC LIMIT 200"
+        ).fetchall()
 
-        if len(curve) <= 1:
-            from datetime import datetime, timezone
-            return [{"time": datetime.now(timezone.utc).isoformat(), "equity": initial_capital}]
+    curve: list[dict] = []
+    seen_minutes: set[str] = set()
+    for row in reversed(rows):
+        try:
+            details = json.loads(row["details_json"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        equity = details.get("equity")
+        if equity is None:
+            continue
+        minute_key = row["created_at"][:16]
+        if minute_key in seen_minutes:
+            continue
+        seen_minutes.add(minute_key)
+        curve.append({"time": row["created_at"], "equity": round(float(equity), 2)})
 
-        return curve[-50:]
+    if not curve:
+        from datetime import datetime, timezone
+        return [{"time": datetime.now(timezone.utc).isoformat(), "equity": round(initial_capital, 2)}]
+
+    return curve[-50:]
 
 
 def save_fear_greed(data: dict) -> dict:

@@ -8,6 +8,9 @@ and ATR-based trailing stops with wider risk tolerance.
 import math
 from statistics import fmean, stdev
 
+from .execution_model import assert_no_lookahead, fill_price
+from .metrics_core import max_drawdown, periods_per_year as _periods_per_year, sharpe_ratio, signed_trade_returns
+
 
 def _ema(data: list[float], period: int) -> list[float]:
     if not data:
@@ -86,7 +89,9 @@ def _periods_per_year(interval: str) -> int:
     return {"4h": 2_190, "1d": 365}.get(interval, 365)
 
 
-def run_swing(candles: list[dict], parameters: dict) -> dict:
+def run_swing(candles: list[dict], parameters: dict,
+    trades_out: list[dict] | None = None,
+) -> dict:
     """Run MACD + Fibonacci swing trading strategy.
 
     Parameters:
@@ -137,6 +142,8 @@ def run_swing(candles: list[dict], parameters: dict) -> dict:
     trades: list[dict] = []
     equity_curve: list[float] = []
     returns: list[float] = []
+    # Bar the position was filled on; no exit may trigger before it.
+    fill_idx = -1
 
     for index, candle in enumerate(candles):
         close = candle["close"]
@@ -161,42 +168,53 @@ def run_swing(candles: list[dict], parameters: dict) -> dict:
             highest_since_entry = max(highest_since_entry, high)
             trailing_stop = highest_since_entry - atr_trail_mult * atr_val
 
-        if quantity == 0:
-            if macd_cross_up and rsi_ok:
-                fib_entry = fib["0.382"]
-                if close <= fib_entry * 1.01:
-                    order_value = cash * allocation
-                    execution_price = close * (1 + slippage_rate)
-                    fee = order_value * fee_rate
-                    quantity = (order_value - fee) / execution_price
-                    cash -= order_value
-                    entry_price = execution_price
-                    highest_since_entry = high
-                    trailing_stop = entry_price - atr_stop_mult * atr_val
-                    trades.append({
-                        "side": "buy", "price": execution_price,
-                        "time": candle["close_time"], "fee": fee,
-                        "stop_loss": round(trailing_stop, 2),
-                        "fib_0382": fib["0.382"], "fib_0618": fib["0.618"],
-                    })
-
-        elif quantity > 0:
-            hit_stop = close < trailing_stop
+        # --- Exit: a trailing stop or a signal decided on this bar is filled at
+        # the NEXT bar's open, never at this bar's close. ---
+        if quantity > 0 and index > fill_idx:
             signal_exit = macd_cross_down or (macd_bullish and rsi_vals[index] > 75)
-
-            if hit_stop or signal_exit:
-                execution_price = close * (1 - slippage_rate)
+            if close < trailing_stop or signal_exit:
+                # Both the trailing stop and the signal are decided on this bar
+                # from its close, so the fill is the next bar's open.
+                execution_price = fill_price(candles, index, "sell", slippage_rate)
+                reason = "trailing_stop" if close < trailing_stop else "macd_signal"
+            else:
+                execution_price, reason = None, None
+            if execution_price is not None:
                 proceeds = quantity * execution_price
                 fee = proceeds * fee_rate
                 cash += proceeds - fee
                 pnl = (execution_price - entry_price) / entry_price
                 trades.append({
                     "side": "sell", "price": execution_price,
-                    "time": candle["close_time"], "fee": fee,
+                    "time": candles[index + 1]["close_time"], "fee": fee,
                     "pnl_pct": round(pnl * 100, 3),
-                    "exit_reason": "trailing_stop" if hit_stop else "macd_signal",
+                    "exit_reason": reason,
+                    "signal_index": index, "fill_index": index + 1,
                 })
                 quantity = 0.0
+
+        # --- Entry: decided on this bar, filled at the NEXT bar's open. ---
+        if quantity == 0:
+            if macd_cross_up and rsi_ok:
+                fib_entry = fib["0.382"]
+                if close <= fib_entry * 1.01:
+                    execution_price = fill_price(candles, index, "buy", slippage_rate)
+                    if execution_price is not None:
+                        order_value = cash * allocation
+                        fee = order_value * fee_rate
+                        quantity = (order_value - fee) / execution_price
+                        cash -= order_value
+                        entry_price = execution_price
+                        highest_since_entry = candles[index + 1]["high"]
+                        trailing_stop = entry_price - atr_stop_mult * atr_val
+                        fill_idx = index + 1
+                        trades.append({
+                            "side": "buy", "price": execution_price,
+                            "time": candles[index + 1]["close_time"], "fee": fee,
+                            "stop_loss": round(trailing_stop, 2),
+                            "fib_0382": fib["0.382"], "fib_0618": fib["0.618"],
+                            "signal_index": index, "fill_index": index + 1,
+                        })
 
         equity = cash + quantity * close
         if equity_curve:
@@ -207,28 +225,27 @@ def run_swing(candles: list[dict], parameters: dict) -> dict:
         raise ValueError("Pas de données suffisantes.")
 
     final_equity = equity_curve[-1]
-    peak, max_drawdown = equity_curve[0], 0.0
-    for eq in equity_curve:
-        peak = max(peak, eq)
-        if peak > 0:
-            max_drawdown = min(max_drawdown, eq / peak - 1)
+    drawdown = max_drawdown(equity_curve)
+    assert_no_lookahead(trades, candles)
+    if trades_out is not None:
+        trades_out.extend(trades)
 
     completed = list(zip(trades[::2], trades[1::2]))
     wins = sum(1 for b, s in completed if s["price"] > b["price"])
     ppy = _periods_per_year(interval)
-    sharpe = (fmean(returns) / stdev(returns) * math.sqrt(ppy)
-              if len(returns) > 1 and stdev(returns) > 0 else 0.0)
+    sharpe = sharpe_ratio(returns, ppy)
 
     return {
         "final_equity": round(final_equity, 2),
         "total_return": round(final_equity / initial_capital - 1, 6),
-        "max_drawdown": round(max_drawdown, 6),
+        "max_drawdown": round(drawdown, 6),
         "sharpe_ratio": round(sharpe, 4),
         "trade_count": len(completed),
         "win_rate": round(wins / len(completed), 6) if completed else 0.0,
         "avg_trade_return": round(
             fmean([s["price"] / b["price"] - 1 for b, s in completed]), 6
         ) if completed else 0.0,
+        "trade_returns": [s["price"] / b["price"] - 1 for b, s in completed],
         "strategy": "swing",
         "parameters_used": {
             "macd_fast": macd_fast, "macd_slow": macd_slow, "macd_signal": macd_signal,

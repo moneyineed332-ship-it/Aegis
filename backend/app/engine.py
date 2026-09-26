@@ -700,6 +700,7 @@ async def _execute_ict_trade(symbol: str, recommendation: dict, price: float) ->
                 setup_type=recommendation.get("setup_type", "ICT_SMC"),
                 timeframe="M15",
                 session=recommendation.get("session", ""),
+                trade_id=result.get("order_id", ""),
             )
 
         # Record in journal
@@ -842,9 +843,33 @@ async def task_execute_trades():
                 "order_id": result.get("order_id"),
             })
 
-            # Record in risk module
+            # Record in risk module.
+            # The circuit breaker must see the money actually made or lost, not
+            # the traded notional: passing the notional made every buy look
+            # like a full-notional loss and tripped the breaker on volume.
             notional = fill_price * quantity
-            risk.record_trade_result(notional if side == "sell" else -notional)
+            fee = float(result.get("fee") or 0.0)
+            closed_qty = min(quantity, abs(current_qty)) if current_pos and current_qty != 0 else 0.0
+            if closed_qty > 0 and current_pos:
+                avg_price = current_pos["average_price"]
+                direction = 1.0 if current_qty > 0 else -1.0
+                gross_pnl = (fill_price - avg_price) * closed_qty * direction
+            else:
+                gross_pnl = 0.0
+            realized_pnl = gross_pnl - fee
+            risk.record_trade_result(realized_pnl)
+            storage.log_engine_event(_get_cycle_id(), "trade_pnl", {
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
+                "fill_price": fill_price,
+                "notional": round(notional, 2),
+                "closed_qty": closed_qty,
+                "gross_pnl": round(gross_pnl, 2),
+                "fee": round(fee, 2),
+                "realized_pnl": round(realized_pnl, 2),
+                "order_id": result.get("order_id"),
+            })
 
             # Track trade outcome for learning
             order_id = result.get("order_id", "")
@@ -1068,22 +1093,43 @@ async def task_monitor_positions():
                         pos.id, price, current_high=price, current_low=price,
                     )
                     if update.action in ("close", "partial_close"):
+                        # A partial close only releases part of the position.
+                        # Submitting the full size oversold the book and made
+                        # the position manager's own sizing drift.
+                        close_qty = update.close_size or pos.position_size_lots
+                        if close_qty <= 0:
+                            close_qty = pos.position_size_lots
                         # Close position via OMS
                         close_result = oms.oms.submit_market_order(
                             symbol=pos.instrument,
                             side="sell" if pos.direction == "buy" else "buy",
-                            quantity=pos.position_size_lots,
+                            quantity=close_qty,
                             current_price=price,
                             strategy="ict_position_manager",
                             reason=update.message,
                         )
                         if close_result.get("status") in ("filled", "partial"):
                             if _ict_risk_manager:
-                                _ict_risk_manager.register_trade_exit(
-                                    pos.journal_entry_id, price,
-                                )
+                                # The risk manager keyed the entry on the OMS
+                                # order id, so the exit must use the same id
+                                # (pos.id). The journal id is a fallback for
+                                # positions opened before the ids were unified.
+                                settled = _ict_risk_manager.register_trade_exit(pos.id, price)
+                                if settled is None and pos.journal_entry_id:
+                                    settled = _ict_risk_manager.register_trade_exit(pos.journal_entry_id, price)
+                                if settled is None:
+                                    logger.warning(
+                                        "ICT trade %s closed on the book but not settled in the risk manager",
+                                        pos.id,
+                                    )
+                            # Feed the global circuit breaker with the money
+                            # actually made or lost on this close.
+                            risk.record_trade_result(update.pnl)
                             storage.log_engine_event(_get_cycle_id(), "ict_position_closed", {
                                 "instrument": pos.instrument,
+                                "position_id": pos.id,
+                                "action": update.action,
+                                "close_qty": close_qty,
                                 "reason": update.reason.value if update.reason else "unknown",
                                 "pnl": update.pnl,
                             })

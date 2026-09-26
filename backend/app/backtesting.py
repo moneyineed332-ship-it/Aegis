@@ -38,30 +38,18 @@ def _dynamic_sizing(capital: float, atr: float, price: float, allocation: float,
     return min(position_size, max_size)
 
 
-def _sortino_ratio(returns: list[float], periods_per_year: int) -> float:
-    """Sortino ratio — penalizes only downside volatility."""
-    if len(returns) < 2:
-        return 0.0
-    mean_ret = fmean(returns)
-    downside = [r for r in returns if r < 0]
-    if len(downside) < 2:
-        return 0.0
-    downside_std = stdev(downside)
-    if downside_std == 0:
-        return 0.0
-    return round(mean_ret / downside_std * math.sqrt(periods_per_year), 4)
-
-
-def _calmar_ratio(total_return: float, max_drawdown: float, periods: int, periods_per_year: int) -> float:
-    """Calmar ratio — return / max drawdown, annualized."""
-    if max_drawdown >= 0 or periods == 0:
-        return 0.0
-    annual_return = (1 + total_return) ** (periods_per_year / max(periods, 1)) - 1
-    return round(annual_return / abs(max_drawdown), 4)
+from .metrics_core import (
+    calmar_ratio,
+    max_drawdown,
+    periods_per_year,
+    sharpe_ratio,
+    signed_trade_returns,
+    sortino_ratio,
+)
 
 
 def _periods_per_year(interval: str) -> int:
-    return {"5m": 105_120, "15m": 35_040, "1h": 8_760, "4h": 2_190, "1d": 365}.get(interval, 8_760)
+    return periods_per_year(interval)
 
 
 def run_sma_crossover(candles: list[dict], parameters: dict) -> dict:
@@ -135,28 +123,26 @@ def run_sma_crossover(candles: list[dict], parameters: dict) -> dict:
         equity_curve.append(equity)
 
     final_equity = equity_curve[-1]
-    peak, max_drawdown = equity_curve[0], 0.0
-    for eq in equity_curve:
-        peak = max(peak, eq)
-        max_drawdown = min(max_drawdown, eq / peak - 1)
+    drawdown = max_drawdown(equity_curve)
 
     completed = list(zip(trades[::2], trades[1::2]))
     wins = sum(1 for buy, sell in completed if sell["price"] > buy["price"])
     ppy = _periods_per_year(interval)
-    sharpe = fmean(returns) / stdev(returns) * math.sqrt(ppy) if len(returns) > 1 and stdev(returns) > 0 else 0.0
-    sortino = _sortino_ratio(returns, ppy)
-    calmar = _calmar_ratio(final_equity / initial_capital - 1, max_drawdown, len(returns), ppy)
+    sharpe = sharpe_ratio(returns, ppy)
+    sortino = sortino_ratio(returns, ppy)
+    calmar = calmar_ratio(final_equity / initial_capital - 1, drawdown, len(returns), ppy)
 
     return {
         "final_equity": round(final_equity, 2),
         "total_return": round(final_equity / initial_capital - 1, 6),
-        "max_drawdown": round(max_drawdown, 6),
+        "max_drawdown": round(drawdown, 6),
         "sharpe_ratio": round(sharpe, 4),
         "sortino_ratio": sortino,
         "calmar_ratio": calmar,
         "trade_count": len(completed),
         "win_rate": round(wins / len(completed), 6) if completed else 0.0,
         "avg_trade_return": round(fmean([s["price"] / b["price"] - 1 for b, s in completed]), 6) if completed else 0.0,
+        "trade_returns": signed_trade_returns(completed),
     }
 
 
@@ -251,28 +237,26 @@ def run_donchian_breakout(candles: list[dict], parameters: dict) -> dict:
         equity_curve.append(equity)
 
     final_equity = equity_curve[-1]
-    peak, max_drawdown = equity_curve[0], 0.0
-    for eq in equity_curve:
-        peak = max(peak, eq)
-        max_drawdown = min(max_drawdown, eq / peak - 1)
+    drawdown = max_drawdown(equity_curve)
 
     completed = list(zip(trades[::2], trades[1::2]))
     wins = sum(1 for b, s in completed if s["price"] > b["price"])
     ppy = _periods_per_year(interval)
-    sharpe = fmean(returns) / stdev(returns) * math.sqrt(ppy) if len(returns) > 1 and stdev(returns) > 0 else 0.0
-    sortino = _sortino_ratio(returns, ppy)
-    calmar = _calmar_ratio(final_equity / initial_capital - 1, max_drawdown, len(returns), ppy)
+    sharpe = sharpe_ratio(returns, ppy)
+    sortino = sortino_ratio(returns, ppy)
+    calmar = calmar_ratio(final_equity / initial_capital - 1, drawdown, len(returns), ppy)
 
     return {
         "final_equity": round(final_equity, 2),
         "total_return": round(final_equity / initial_capital - 1, 6),
-        "max_drawdown": round(max_drawdown, 6),
+        "max_drawdown": round(drawdown, 6),
         "sharpe_ratio": round(sharpe, 4),
         "sortino_ratio": sortino,
         "calmar_ratio": calmar,
         "trade_count": len(completed),
         "win_rate": round(wins / len(completed), 6) if completed else 0.0,
         "avg_trade_return": round(fmean([s["price"] / b["price"] - 1 for b, s in completed]), 6) if completed else 0.0,
+        "trade_returns": signed_trade_returns(completed),
     }
 
 

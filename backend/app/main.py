@@ -189,7 +189,10 @@ def dashboard() -> dict:
     snapshots_prices = {s["symbol"]: s["price"] for s in storage.list_market_snapshots(limit=10)}
     equity_curve = storage.compute_equity_curve(INITIAL_CAPITAL, positions, recent_orders, snapshots_prices)
     current_equity = equity_curve[-1]["equity"] if equity_curve else INITIAL_CAPITAL
-    realized_pnl = current_equity - INITIAL_CAPITAL
+    # current_equity includes open positions, so it is NOT realized PnL.
+    # Take the realized part from the FIFO matcher and expose it separately.
+    realized = position_monitor.get_realized_pnl(recent_orders)
+    realized_pnl = round(realized["realized_pnl"] - realized["total_fees"], 2)
 
     # Advanced risk data
     stress_test_data = None
@@ -269,24 +272,17 @@ def create_paper_order(
         raise HTTPException(422, f"Order exceeds the paper limit of ${MAX_ORDER_NOTIONAL:.0f}.")
     positions = storage.list_positions()
     current = next((position for position in positions if position["symbol"] == symbol), None)
-    signed_quantity = order.quantity if order.side == "buy" else -order.quantity
-    new_quantity = signed_quantity + (current["quantity"] if current else 0)
-    if not current or new_quantity == 0:
-        new_average_price = order.reference_price
-    else:
-        total_cost = current["average_price"] * current["quantity"] + order.reference_price * signed_quantity
-        new_average_price = abs(total_cost / new_quantity) if new_quantity != 0 else order.reference_price
-    next_positions = [position for position in positions if position["symbol"] != symbol]
-    if new_quantity:
-        next_positions.append({"symbol": symbol, "quantity": new_quantity, "average_price": new_average_price})
+
+    # Shared netting helper: the local copy used abs(total_cost / new_qty),
+    # which moved the cost basis on every partial close.
+    position = oms.net_position(current, symbol, order.side, order.quantity, order.reference_price)
+
+    next_positions = [p for p in positions if p["symbol"] != symbol]
+    if position:
+        next_positions.append(position)
     if current_exposure(next_positions) > MAX_TOTAL_EXPOSURE:
         raise HTTPException(422, "Order exceeds the total paper exposure limit.")
 
-    position = None if new_quantity == 0 else {
-        "symbol": symbol,
-        "quantity": new_quantity,
-        "average_price": new_average_price,
-    }
     return storage.save_order_and_position({
         **order.model_dump(),
         "symbol": symbol,
@@ -475,6 +471,16 @@ def supervisor_status() -> dict:
     return {**supervisor.status(storage.get_kill_switch()), "alerts": storage.list_alerts()}
 
 
+@app.get("/api/v1/auth/verify")
+def verify_admin_token(_admin: None = Depends(require_admin_token)) -> dict:
+    """Confirm an admin token is valid without performing any action.
+
+    Lets the dashboard validate a runtime-entered token instead of shipping the
+    secret inside the client bundle.
+    """
+    return {"authenticated": True, "mode": config.MODE}
+
+
 @app.post("/api/v1/supervisor/emergency-stop")
 def emergency_stop(_admin: None = Depends(require_admin_token)) -> dict:
     storage.set_kill_switch(True, "Emergency stop activated manually.")
@@ -498,28 +504,29 @@ def execute_market_order(
 ) -> dict:
     if storage.get_kill_switch():
         raise HTTPException(423, "Emergency stop is active.")
+    if quantity <= 0:
+        raise HTTPException(422, "quantity must be positive.")
     snapshots = storage.list_market_snapshots(limit=1)
     if not snapshots:
         raise HTTPException(422, "No market data available. Refresh prices first.")
     current_price = snapshots[0]["price"]
-    result = execution.market_order(symbol, side, quantity, current_price)
-    if result["status"] == "filled":
-        notional = result["fill_price"] * quantity
-        if notional > config.MAX_ORDER_NOTIONAL:
-            raise HTTPException(422, f"Order exceeds paper limit of ${config.MAX_ORDER_NOTIONAL}.")
-        order_data = {"symbol": symbol, "side": side, "quantity": quantity, "reference_price": result["fill_price"], "notional": notional}
-        signed_quantity = quantity if side == "buy" else -quantity
-        positions = storage.list_positions()
-        current = next((p for p in positions if p["symbol"] == symbol), None)
-        new_quantity = signed_quantity + (current["quantity"] if current else 0)
-        if not current or new_quantity == 0:
-            new_avg = result["fill_price"]
-        else:
-            total_cost = current["average_price"] * current["quantity"] + result["fill_price"] * signed_quantity
-            new_avg = abs(total_cost / new_quantity) if new_quantity != 0 else result["fill_price"]
-        position = None if new_quantity == 0 else {"symbol": symbol, "quantity": new_quantity, "average_price": new_avg}
-        storage.save_order_and_position(order_data, position)
-    return result
+
+    # Reject on the reference notional BEFORE simulating anything. The old code
+    # filled first and only then raised on the limit, so an oversized order was
+    # reported as a rejection while its position had already been booked.
+    if quantity * current_price > config.MAX_ORDER_NOTIONAL:
+        raise HTTPException(422, f"Order exceeds paper limit of ${config.MAX_ORDER_NOTIONAL}.")
+
+    # The OMS applies the kill switch, min/max notional, total exposure, the
+    # circuit breaker and the netting in one place.
+    return oms.oms.submit_market_order(
+        symbol=symbol,
+        side=side,
+        quantity=quantity,
+        current_price=current_price,
+        strategy="manual",
+        reason="Market order from /execution/market-order",
+    )
 
 
 @app.post("/api/v1/execution/limit-order", status_code=201)
@@ -532,11 +539,33 @@ def execute_limit_order(
     limit_price: float = 0,
     _admin: None = Depends(require_admin_token),
 ) -> dict:
+    if storage.get_kill_switch():
+        raise HTTPException(423, "Emergency stop is active.")
     if limit_price <= 0:
         raise HTTPException(422, "limit_price must be positive.")
+    if quantity <= 0:
+        raise HTTPException(422, "quantity must be positive.")
     snapshots = storage.list_market_snapshots(limit=1)
     current_price = snapshots[0]["price"] if snapshots else limit_price
-    return execution.limit_order(symbol, side, quantity, limit_price, current_price)
+
+    # Pre-trade limits are enforced up-front so a rejected order comes back as
+    # HTTP 422, not 201 with a "rejected" body. The OMS re-checks everything.
+    validation = oms.oms._validate_pre_trade(symbol, side, quantity, limit_price)
+    if not validation["valid"]:
+        raise HTTPException(422, validation["reason"])
+
+    # Routed through the OMS so the fill actually updates the position and the
+    # pending-order book. This endpoint used to call the raw simulator, so it
+    # honoured no limits and persisted nothing.
+    return oms.oms.submit_limit_order(
+        symbol=symbol,
+        side=side,
+        quantity=quantity,
+        limit_price=limit_price,
+        current_price=current_price,
+        strategy="manual",
+        reason="Limit order from /execution/limit-order",
+    )
 
 
 @app.post("/api/v1/execution/fractioned-order", status_code=201)
@@ -555,22 +584,28 @@ def execute_fractioned_order(
     if not snapshots:
         raise HTTPException(422, "No market data available.")
     current_price = snapshots[0]["price"]
+
+    # The OMS has no chunked path, so the pre-trade limits are enforced here on
+    # the full order, BEFORE any chunk is simulated. The old code chunked and
+    # filled first, then raised on the notional limit.
+    validation = oms.oms._validate_pre_trade(symbol, side, quantity, current_price)
+    if not validation["valid"]:
+        raise HTTPException(422, validation["reason"])
+
     result = execution.fractioned_order(symbol, side, quantity, current_price, chunks)
     if result["status"] == "filled":
-        notional = result["total_notional"]
-        if notional > config.MAX_ORDER_NOTIONAL:
-            raise HTTPException(422, f"Order exceeds paper limit of ${config.MAX_ORDER_NOTIONAL}.")
-        order_data = {"symbol": symbol, "side": side, "quantity": result["total_filled"], "reference_price": result["avg_fill_price"], "notional": notional}
-        signed_quantity = result["total_filled"] if side == "buy" else -result["total_filled"]
+        order_data = {
+            "symbol": symbol,
+            "side": side,
+            "quantity": result["total_filled"],
+            "reference_price": result["avg_fill_price"],
+            "notional": result["total_notional"],
+        }
         positions = storage.list_positions()
         current = next((p for p in positions if p["symbol"] == symbol), None)
-        new_quantity = signed_quantity + (current["quantity"] if current else 0)
-        if not current or new_quantity == 0:
-            new_avg = result["avg_fill_price"]
-        else:
-            total_cost = current["average_price"] * current["quantity"] + result["avg_fill_price"] * signed_quantity
-            new_avg = abs(total_cost / new_quantity) if new_quantity != 0 else result["avg_fill_price"]
-        position = None if new_quantity == 0 else {"symbol": symbol, "quantity": new_quantity, "average_price": new_avg}
+        position = oms.net_position(
+            current, symbol, side, result["total_filled"], result["avg_fill_price"]
+        )
         storage.save_order_and_position(order_data, position)
     return result
 
@@ -798,14 +833,15 @@ def get_position_pnl() -> dict:
     positions = storage.list_positions()
     snapshots = storage.list_market_snapshots(limit=10)
     prices = {s["symbol"]: s["price"] for s in snapshots}
-    capital = config.PAPER_CAPITAL
+    capital = config.active_capital()
     orders = storage.list_recent_orders(limit=200)
 
-    portfolio = position_monitor.compute_portfolio_summary(positions, prices, capital)
     realized = position_monitor.get_realized_pnl(orders)
-    portfolio["realized_pnl"] = realized["realized_pnl"]
-    portfolio["total_fees"] = realized["total_fees"]
-    portfolio["total_pnl"] = round(realized["realized_pnl"] + portfolio["total_unrealized_pnl"], 2)
+    portfolio = position_monitor.compute_portfolio_summary(
+        positions, prices, capital,
+        realized_pnl=realized["realized_pnl"],
+        total_fees=realized["total_fees"],
+    )
     portfolio["total_pnl_pct"] = round(
         (portfolio["total_pnl"] / capital * 100) if capital > 0 else 0, 2
     )
@@ -963,9 +999,17 @@ async def websocket_positions(websocket: WebSocket):
             positions = storage.list_positions()
             snapshots = storage.list_market_snapshots(limit=10)
             prices = {s["symbol"]: s["price"] for s in snapshots}
-            capital = config.PAPER_CAPITAL
+            capital = config.active_capital()
+            realized = position_monitor.get_realized_pnl(storage.list_recent_orders(limit=200))
 
-            portfolio = position_monitor.compute_portfolio_summary(positions, prices, capital)
+            portfolio = position_monitor.compute_portfolio_summary(
+                positions, prices, capital,
+                realized_pnl=realized["realized_pnl"],
+                total_fees=realized["total_fees"],
+            )
+            portfolio["total_pnl_pct"] = round(
+                (portfolio["total_pnl"] / capital * 100) if capital > 0 else 0, 2
+            )
             portfolio["kill_switch"] = storage.get_kill_switch()
             portfolio["mode"] = config.MODE
 

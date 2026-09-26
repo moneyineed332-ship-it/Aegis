@@ -22,7 +22,7 @@ import {
   BarChart3,
   Eye,
 } from "lucide-react";
-import type { DashboardSnapshot } from "../../lib/api";
+import type { DashboardSnapshot } from "../../../lib/api";
 
 interface SidebarProps {
   data: DashboardSnapshot | null;

@@ -55,6 +55,9 @@ logger = logging.getLogger(__name__)
 # Cooldown après lequel un blocage revenge-trading expire automatiquement (heures).
 REVENGE_BLOCK_COOLDOWN_HOURS = 4
 
+# Taille de lot minimale acceptée par le broker (MT5 standard Forex).
+MIN_LOT_SIZE = 0.01
+
 
 # ============================================================
 # TYPES
@@ -99,6 +102,11 @@ class RiskLimits:
     max_trades_per_session: int
     max_simultaneous_positions: int
     min_rr_ratio: float
+    # Hard ceiling on the risk actually taken by one trade. A small account
+    # cannot respect max_risk_per_trade_pct with the broker minimum lot
+    # (0.01 lots risks ~10x more than 0.5% of a 50 EUR balance), so a trade is
+    # refused above this ceiling rather than above the nominal per-trade risk.
+    max_effective_risk_pct: float = 0.05
 
 
 @dataclass
@@ -272,13 +280,22 @@ class IctRiskManager:
             blocking_reasons = []
             
             # 1. LIMITE DE RISQUE PAR TRADE
+            # The nominal risk is converted into lots, then rounded to the
+            # broker minimum. What matters for the account is the risk actually
+            # taken, so the effective (post-rounding) risk is what is checked.
             risk_amount = self.current_equity * limits.max_risk_per_trade_pct
             sl_distance_pips = abs(entry_price - sl_price) / cfg.pip_value
             pip_value_per_lot = cfg.contract_size * cfg.pip_value
             theoretical_lots = risk_amount / (sl_distance_pips * pip_value_per_lot) if sl_distance_pips > 0 else 0
-            
-            if theoretical_lots < 0.01:
-                blocking_reasons.append(f"Position size trop petite ({theoretical_lots:.4f} lots < 0.01)")
+            executable_lots = max(round(theoretical_lots, 2), MIN_LOT_SIZE)
+            effective_risk = sl_distance_pips * pip_value_per_lot * executable_lots
+            effective_risk_pct = effective_risk / self.current_equity if self.current_equity > 0 else 0
+
+            if sl_distance_pips > 0 and effective_risk_pct > limits.max_effective_risk_pct:
+                blocking_reasons.append(
+                    f"Risque effectif trop élevé ({effective_risk_pct:.2%} > {limits.max_effective_risk_pct:.2%}) "
+                    f"— 0.01 lot minimum sur {self.current_equity:.0f} EUR"
+                )
             
             # 2. DRAWDOWN JOURNALIER (losses only — gains must not block)
             daily_dd_pct = max(0.0, -self._daily_pnl) / self._session_start_equity if self._session_start_equity > 0 else 0
@@ -439,8 +456,12 @@ class IctRiskManager:
         Applique la réduction de volatilité si nécessaire (§11).
         """
         cfg = get_instrument_config(instrument)
-        risk = (risk_pct or cfg.risk_per_trade_pct) * volatility_reduction
-        return calculate_position_size(instrument, self.current_equity, entry_price, sl_price, risk)
+        risk = (risk_pct if risk_pct is not None else cfg.risk_per_trade_pct) * volatility_reduction
+        lots = calculate_position_size(instrument, self.current_equity, entry_price, sl_price, risk)
+        # The broker cannot fill less than the minimum lot. Clamping here keeps
+        # the executed size consistent with the effective risk validated in
+        # check_all_limits() instead of trading a physically impossible size.
+        return max(lots, MIN_LOT_SIZE) if lots > 0 else 0.0
     
     # --------------------------------------------------------
     # ENREGISTREMENT TRADES

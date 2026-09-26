@@ -100,6 +100,39 @@ def test_compute_portfolio_summary_empty():
     assert summary["equity"] == 100000
 
 
+def test_realized_loss_lowers_equity():
+    """A closed losing trade must stay visible in equity (drawdown monitor)."""
+    positions = [{"symbol": "BTCUSDT", "quantity": 1.0, "average_price": 50000}]
+    prices = {"BTCUSDT": 50000}
+    summary = position_monitor.compute_portfolio_summary(
+        positions, prices, 100000, realized_pnl=-2000, total_fees=0
+    )
+    assert summary["equity"] == 98000
+    assert summary["realized_pnl"] == -2000
+
+
+def test_realized_gain_raises_equity():
+    summary = position_monitor.compute_portfolio_summary([], {}, 100000, realized_pnl=500)
+    assert summary["equity"] == 100500
+    assert summary["total_pnl"] == 500
+
+
+def test_fees_reduce_equity():
+    summary = position_monitor.compute_portfolio_summary([], {}, 100000, realized_pnl=100, total_fees=12.5)
+    assert summary["equity"] == 100087.5
+    assert summary["total_fees"] == 12.5
+
+
+def test_get_realized_pnl_matches_fifo():
+    orders = [
+        {"id": 1, "symbol": "BTCUSDT", "side": "buy", "quantity": 0.1, "notional": 5000, "fill_price": 50000, "fee": 5},
+        {"id": 2, "symbol": "BTCUSDT", "side": "sell", "quantity": 0.1, "notional": 5500, "fill_price": 55000, "fee": 5},
+    ]
+    result = position_monitor.get_realized_pnl(orders)
+    assert result["realized_pnl"] == 500
+    assert result["total_fees"] == 10
+
+
 def test_check_position_risks_no_alerts():
     positions = [{"symbol": "BTCUSDT", "quantity": 0.001, "average_price": 50000}]
     prices = {"BTCUSDT": 51000}

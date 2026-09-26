@@ -28,6 +28,9 @@ ORDER_CANCELLED = "cancelled"
 ORDER_REJECTED = "rejected"
 ORDER_EXPIRED = "expired"
 
+# Float dust tolerance when comparing quantities (8 decimals max precision).
+_QTY_TOLERANCE = 1e-9
+
 
 class OrderManager:
     """Manages order lifecycle: validate → submit → track → reconcile."""
@@ -100,17 +103,27 @@ class OrderManager:
         # Total exposure check
         positions = storage.list_positions()
         current_exposure = sum(abs(p["quantity"] * p["average_price"]) for p in positions)
+        current = next((p for p in positions if p["symbol"] == symbol), None)
+        held_qty = current["quantity"] if current else 0.0
+        held_exposure = abs(held_qty) * current["average_price"] if current else 0.0
+
         if side == "buy":
-            new_exposure = current_exposure + notional
+            if held_qty < 0:
+                # Covering a short releases the entry-price exposure; only the
+                # excess opens new long exposure. A buy larger than the short
+                # held is therefore capped, which keeps naked shorts impossible.
+                new_exposure = current_exposure - min(notional, held_exposure)
+                if notional > held_exposure:
+                    new_exposure += notional - held_exposure
+            else:
+                new_exposure = current_exposure + notional
         else:
             # Closing (or reducing) a position can only release the exposure
-            # stored at entry price. Naked shorts stay forbidden, but selling
-            # at a profit (notional > stored exposure) must not be rejected.
-            current = next((p for p in positions if p["symbol"] == symbol), None)
-            stored = abs(current["quantity"]) * current["average_price"] if current else 0
-            if stored <= 0:
+            # stored at entry price. Selling more than the quantity held would
+            # create a naked short, which is forbidden outright.
+            if held_qty <= 0 or quantity > held_qty + _QTY_TOLERANCE:
                 return {"valid": False, "reason": "Cannot sell more than owned"}
-            new_exposure = current_exposure - min(notional, stored)
+            new_exposure = current_exposure - min(notional, held_exposure)
 
         if new_exposure > config.MAX_TOTAL_EXPOSURE:
             return {"valid": False, "reason": f"Total exposure ({new_exposure:.2f}) would exceed max ({config.MAX_TOTAL_EXPOSURE})"}
@@ -197,21 +210,8 @@ class OrderManager:
         """Update position after a fill."""
         positions = storage.list_positions()
         current = next((p for p in positions if p["symbol"] == symbol), None)
-        current_qty = current["quantity"] if current else 0
-
-        signed_qty = quantity if side == "buy" else -quantity
-        new_qty = signed_qty + current_qty
-
-        if new_qty == 0:
-            new_avg = 0
-            position = None
-        else:
-            if current:
-                total_cost = current["average_price"] * current["quantity"] + fill_price * signed_qty
-                new_avg = abs(total_cost / new_qty)
-            else:
-                new_avg = fill_price
-            position = {"symbol": symbol, "quantity": new_qty, "average_price": new_avg}
+        position = net_position(current, symbol, side, quantity, fill_price)
+        new_qty = position["quantity"] if position else 0
 
         notional = fill_price * quantity
         order_data = {
@@ -483,6 +483,42 @@ class OrderManager:
             "recent_orders": len(orders),
             "kill_switch": storage.get_kill_switch(),
         }
+
+
+def net_position(
+    current: dict | None,
+    symbol: str,
+    side: str,
+    quantity: float,
+    fill_price: float,
+) -> dict | None:
+    """Apply a fill to a netted position and return the new row, or None.
+
+    Single source of truth for position averaging. The basis only moves when
+    exposure is added; reducing leaves the remaining basis untouched and a
+    flip re-bases on the fill price. The previous copies of this logic used
+    ``abs(total_cost / new_qty)``, which moved the basis on every partial
+    close and corrupted every downstream PnL, VaR and breaker reading.
+    """
+    current_qty = current["quantity"] if current else 0.0
+    signed_qty = quantity if side == "buy" else -quantity
+    new_qty = signed_qty + current_qty
+
+    if new_qty == 0:
+        return None
+
+    if not current:
+        new_avg = fill_price
+    elif current_qty * new_qty > 0 and abs(new_qty) > abs(current_qty):
+        total_cost = abs(current["average_price"] * current_qty) + abs(fill_price * signed_qty)
+        new_avg = total_cost / abs(new_qty)
+    elif current_qty * new_qty > 0:
+        new_avg = current["average_price"]
+    else:
+        # Flipped direction: the residual is a fresh position.
+        new_avg = fill_price
+
+    return {"symbol": symbol, "quantity": new_qty, "average_price": new_avg}
 
 
 def _to_ccxt_symbol(symbol: str) -> str:

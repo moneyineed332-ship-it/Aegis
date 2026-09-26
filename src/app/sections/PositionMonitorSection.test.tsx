@@ -4,6 +4,7 @@ import { ToastProvider } from "../components/Toast";
 import PositionMonitorSection from "./PositionMonitorSection";
 
 vi.mock("../../lib/api", () => ({
+  getAdminToken: vi.fn().mockReturnValue(""),
   getPositionMonitor: vi.fn().mockResolvedValue({
     portfolio: {
       equity: 10500,

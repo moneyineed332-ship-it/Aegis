@@ -154,6 +154,23 @@ def generate_signal(candles: list[dict]) -> dict:
     """
     analysis = analyze(candles)
 
+    if "entry_zone" not in analysis:
+        # analyze() short-circuits with a partial dict when there is not enough
+        # history. Reading the full key set here used to raise KeyError, which
+        # broke every backtest whose rolling window was under 50 candles.
+        return {
+            "action": "wait",
+            "strategy": "smc_ict",
+            "confidence": 0,
+            "entry_zone": None,
+            "stop_loss": None,
+            "take_profit": None,
+            "market_structure": "unknown",
+            "last_bos": None,
+            "last_choch": None,
+            "reasons": [analysis.get("reason", "insufficient_data")],
+        }
+
     action = "wait"
     if analysis["signal"] == "buy" and analysis["score"] >= 40:
         action = "buy"

@@ -95,13 +95,11 @@ const LazyTradeChart = lazy(() =>
             yAxisId="price"
             dataKey="signal"
             fill="#00ff88"
-            shape={(props: Record<string, unknown>) => {
-              const cx = props.cx as number;
-              const cy = props.cy as number;
-              const payload = props.payload as ChartData;
+            shape={(props: unknown): React.JSX.Element => {
+              const { cx, cy, payload } = props as { cx: number; cy: number; payload: ChartData };
               const isBuy = payload.signal === 1;
               const isSell = payload.signal === -1;
-              if (!isBuy && !isSell) return null;
+              if (!isBuy && !isSell) return <g />;
               return (
                 <g>
                   <circle cx={cx} cy={cy} r={6} fill={isBuy ? "#00ff88" : "#ff4444"} fillOpacity={0.3} />
@@ -157,7 +155,7 @@ export default function PortfolioSection() {
       setSnapshot(dash);
       setSignals(sigs);
       setLogs(engLogs as Array<{ event_type: string; details: Record<string, unknown> | null; created_at: string }>);
-      setEngineStatus(status as Record<string, unknown>);
+      setEngineStatus(status as unknown as Record<string, unknown>);
     } catch {
       toast.error("Erreur lors du chargement");
     } finally {

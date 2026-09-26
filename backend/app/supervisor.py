@@ -32,17 +32,22 @@ def _market_prices() -> dict:
 
 
 def portfolio_equity(capital: float | None = None) -> float:
-    """Capital + unrealized PnL valued at last market prices.
+    """Capital + realized PnL - fees + unrealized PnL at last market prices.
 
-    Defaults to the active mode capital (ICT 50 € / paper 20 €).
+    Defaults to the active mode capital (ICT 50 EUR / paper 20 EUR).
     Falls back to entry price per position when no snapshot exists,
-    so equity is never worse than cost basis in that case.
+    so equity is never worse than cost basis in that case. The realized term
+    is mandatory: without it a closed loss disappeared from equity and the
+    drawdown monitor could not see it.
     """
     from . import position_monitor
     cap = capital if capital is not None else config.active_capital()
     try:
+        realized = position_monitor.get_realized_pnl(storage.list_recent_orders(limit=200))
         summary = position_monitor.compute_portfolio_summary(
-            storage.list_positions(), _market_prices(), cap
+            storage.list_positions(), _market_prices(), cap,
+            realized_pnl=realized["realized_pnl"],
+            total_fees=realized["total_fees"],
         )
         return float(summary["equity"])
     except Exception:

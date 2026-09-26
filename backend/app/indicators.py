@@ -9,6 +9,9 @@ from __future__ import annotations
 import math
 from statistics import fmean, stdev
 
+from .metrics_core import periods_per_year as _periods_per_year
+from .metrics_core import sortino_ratio as _sortino
+
 
 # ── EMA ─────────────────────────────────────────────────────────────
 
@@ -324,33 +327,22 @@ def stochastic(candles: list[dict], k_period: int = 5, d_period: int = 3) -> tup
 
 # ── Periods Per Year ────────────────────────────────────────────────
 
-_INTERVALS: dict[str, int] = {
-    "1m": 525_600,
-    "5m": 105_120,
-    "15m": 35_040,
-    "30m": 17_520,
-    "1h": 8_760,
-    "4h": 2_190,
-    "1d": 365,
-}
-
-
 def periods_per_year(interval: str) -> int:
-    """Return annualization factor for a candle interval."""
-    return _INTERVALS.get(interval, 8_760)
+    """Return annualization factor for a candle interval.
+
+    Thin alias onto :mod:`metrics_core`, which owns the canonical table.
+    """
+    return _periods_per_year(interval)
 
 
 # ── Sortino Ratio ───────────────────────────────────────────────────
 
-def sortino_ratio(returns: list[float], ppy: int) -> float:
-    """Sortino ratio — penalises only downside volatility."""
-    if len(returns) < 2:
-        return 0.0
-    downside = [r for r in returns if r < 0]
-    if len(downside) < 2:
-        return 0.0
-    ds = stdev(downside)
-    return round(fmean(returns) / ds * math.sqrt(ppy), 4) if ds > 0 else 0.0
+def sortino_ratio(returns: list[float], ppy: int, target: float = 0.0) -> float:
+    """Sortino ratio — penalises only downside volatility.
+
+    Thin alias onto :mod:`metrics_core` so every module shares one definition.
+    """
+    return _sortino(returns, ppy, target)
 
 
 # ════════════════════════════════════════════════════════════════════

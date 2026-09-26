@@ -362,33 +362,36 @@ def calculate_position_size(
     risk_pct: float | None = None
 ) -> float:
     """
-    Calcule la taille de position basée sur le risque % et la distance SL.
+    Calcule la taille de position basée sur le risque et la distance SL.
     Utilise forex_indicators pour calculs précis Forex.
-    
+
+    `risk_pct` est une FRACTION du capital (0.005 = 0.5 %), identique à
+    IctConfig.risk_per_trade_pct.
+
     Returns:
         Taille en lots (arrondi à 0.01)
     """
     cfg = get_instrument_config(symbol)
+    risk = risk_pct if risk_pct is not None else cfg.risk_per_trade_pct
     try:
         from .forex_indicators import calculate_forex_position_size
-        result = calculate_forex_position_size(symbol, account_equity, risk_pct or cfg.risk_per_trade_pct, entry_price, sl_price)
+        result = calculate_forex_position_size(symbol, account_equity, risk, entry_price, sl_price)
         return result["lots"]
     except ImportError:
         # Fallback to original calculation if forex_indicators not available
-        risk = risk_pct or cfg.risk_per_trade_pct
-        
         risk_amount = account_equity * risk
+
         sl_distance_pips = abs(entry_price - sl_price) / cfg.pip_value
-        
+
         if sl_distance_pips <= 0:
             return 0.0
-        
+
         # Valeur d'un pip pour 1 lot
         pip_value_per_lot = cfg.contract_size * cfg.pip_value
-        
+
         # Lots = risque / (distance_SL_pips * valeur_pip_par_lot)
         lots = risk_amount / (sl_distance_pips * pip_value_per_lot)
-        
+
         # Arrondi à 0.01 lot (standard MT5)
         return round(lots, 2)
 

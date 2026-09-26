@@ -51,11 +51,23 @@ describe("RiskSection", () => {
     await act(async () => {});
   });
 
-  it("renders risk data after load", async () => {
+  it("renders risk amounts in currency, not as inflated percentages", async () => {
     renderWithToast(<RiskSection />);
     await waitFor(() => {
-      expect(screen.getByText(/5982/)).toBeInTheDocument();
+      // value_at_risk (59.82) and CVaR (102.72) are currency amounts.
+      expect(screen.getByText("$59,82")).toBeInTheDocument();
+      expect(screen.getByText("$102,72")).toBeInTheDocument();
     });
+    // The old bug multiplied the amount by 100 and appended "%".
+    expect(screen.queryByText("5 982,00%")).not.toBeInTheDocument();
+  });
+
+  it("does not re-multiply max_drawdown_pct which is already a percentage", async () => {
+    renderWithToast(<RiskSection />);
+    await waitFor(() => {
+      expect(screen.getByText("-5.85%")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("-585.00%")).not.toBeInTheDocument();
   });
 
   it("renders stress test scenarios", async () => {

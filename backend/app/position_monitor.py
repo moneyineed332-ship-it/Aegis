@@ -64,8 +64,20 @@ def compute_position_pnl(position: dict, current_price: float) -> dict:
     }
 
 
-def compute_portfolio_summary(positions: list[dict], prices: dict[str, float], capital: float) -> dict:
-    """Compute full portfolio summary with PnL breakdown."""
+def compute_portfolio_summary(
+    positions: list[dict],
+    prices: dict[str, float],
+    capital: float,
+    realized_pnl: float = 0.0,
+    total_fees: float = 0.0,
+) -> dict:
+    """Compute full portfolio summary with PnL breakdown.
+
+    ``realized_pnl`` is the FIFO result of closed trades and must be supplied
+    by the caller (see :func:`get_realized_pnl`). Without it the equity figure
+    ignores every loss already booked, which made the drawdown monitor read
+    0% right after a losing position was closed.
+    """
     position_details = []
     total_unrealized = 0.0
     total_exposure = 0.0
@@ -83,12 +95,16 @@ def compute_portfolio_summary(positions: list[dict], prices: dict[str, float], c
         elif detail["side"] == "short":
             short_exposure += detail["notional"]
 
-    equity = capital + total_unrealized
+    net_realized = realized_pnl - total_fees
+    equity = capital + net_realized + total_unrealized
     exposure_pct = (total_exposure / capital * 100) if capital > 0 else 0
 
     return {
         "capital": capital,
         "equity": round(equity, 2),
+        "realized_pnl": round(net_realized, 2),
+        "total_fees": round(total_fees, 4),
+        "total_pnl": round(net_realized + total_unrealized, 2),
         "total_unrealized_pnl": round(total_unrealized, 2),
         "total_unrealized_pnl_pct": round((total_unrealized / capital * 100) if capital > 0 else 0, 2),
         "total_exposure": round(total_exposure, 2),
@@ -215,14 +231,15 @@ def monitor_cycle(prices: dict[str, float]) -> dict:
     capital = config.active_capital()
     orders = storage.list_recent_orders(limit=200)
 
-    # Portfolio summary
-    portfolio = compute_portfolio_summary(positions, prices, capital)
-
-    # Realized PnL
+    # Realized PnL first: the equity used by every risk check must include it.
     realized = get_realized_pnl(orders)
-    portfolio["realized_pnl"] = realized["realized_pnl"]
-    portfolio["total_fees"] = realized["total_fees"]
-    portfolio["total_pnl"] = round(realized["realized_pnl"] + portfolio["total_unrealized_pnl"], 2)
+
+    # Portfolio summary
+    portfolio = compute_portfolio_summary(
+        positions, prices, capital,
+        realized_pnl=realized["realized_pnl"],
+        total_fees=realized["total_fees"],
+    )
     portfolio["total_pnl_pct"] = round(
         (portfolio["total_pnl"] / capital * 100) if capital > 0 else 0, 2
     )

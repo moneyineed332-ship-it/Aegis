@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
+import React from "react";
 import { ToastProvider, useToast } from "./Toast";
 
 function TestComponent() {
@@ -24,11 +25,22 @@ describe("Toast", () => {
 
   it("throws when useToast used outside provider", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    let captured: Error | null = null;
+    // An error boundary consumes the error so React does not also report it
+    // as an unhandled rejection, which would fail the whole run.
+    class Catcher extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+      state = { failed: false };
+      static getDerivedStateFromError() { return { failed: true }; }
+      componentDidCatch(error: Error) { captured = error; }
+      render() { return this.state.failed ? null : this.props.children; }
+    }
     function Bad() {
       useToast();
       return null;
     }
-    expect(() => render(<Bad />)).toThrow("useToast must be used within ToastProvider");
+    render(<Catcher><Bad /></Catcher>);
+    expect(captured).toBeInstanceOf(Error);
+    expect((captured as unknown as Error).message).toBe("useToast must be used within ToastProvider");
     spy.mockRestore();
   });
 

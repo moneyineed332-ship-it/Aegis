@@ -1,8 +1,11 @@
 """SMC/ICT + Multi-Timeframe + Multi-Scale Crossover backtesting."""
 
 import logging
-import math
-from statistics import fmean, stdev
+
+from statistics import fmean
+
+from .execution_model import assert_no_lookahead, fill_price, intrabar_exit_price
+from .metrics_core import calmar_ratio, max_drawdown, periods_per_year, sharpe_ratio, signed_trade_returns, sortino_ratio
 
 logger = logging.getLogger(__name__)
 
@@ -24,53 +27,35 @@ def _compute_atr(candles: list[dict], period: int = 14) -> list[float]:
 
 
 def _periods_per_year(interval: str) -> int:
-    return {"5m": 105_120, "15m": 35_040, "1h": 8_760, "4h": 2_190, "1d": 365}.get(interval, 8_760)
-
-
-def _sortino(returns: list[float], ppy: int) -> float:
-    if len(returns) < 2:
-        return 0.0
-    downside = [r for r in returns if r < 0]
-    if len(downside) < 2:
-        return 0.0
-    ds = stdev(downside)
-    return round(fmean(returns) / ds * math.sqrt(ppy), 4) if ds > 0 else 0.0
-
-
-def _calmar(total_return: float, max_dd: float, periods: int, ppy: int) -> float:
-    if max_dd >= 0 or periods == 0:
-        return 0.0
-    annual_return = (1 + total_return) ** (ppy / max(periods, 1)) - 1
-    return round(annual_return / abs(max_dd), 4)
+    return periods_per_year(interval)
 
 
 def _compute_metrics(equity_curve: list[float], initial_capital: float, trades: list[dict], interval: str) -> dict:
     if not equity_curve:
         raise ValueError("No equity data generated.")
     final = equity_curve[-1]
-    peak, max_dd = equity_curve[0], 0.0
-    for eq in equity_curve:
-        peak = max(peak, eq)
-        max_dd = min(max_dd, eq / peak - 1)
+    drawdown = max_drawdown(equity_curve)
     returns = [equity_curve[i] / equity_curve[i - 1] - 1 for i in range(1, len(equity_curve))]
     completed = list(zip(trades[::2], trades[1::2]))
     wins = sum(1 for b, s in completed if s["price"] > b["price"])
     ppy = _periods_per_year(interval)
-    sharpe = fmean(returns) / stdev(returns) * math.sqrt(ppy) if len(returns) > 1 and stdev(returns) > 0 else 0.0
     return {
         "final_equity": round(final, 2),
         "total_return": round(final / initial_capital - 1, 6),
-        "max_drawdown": round(max_dd, 6),
-        "sharpe_ratio": round(sharpe, 4),
-        "sortino_ratio": _sortino(returns, ppy),
-        "calmar_ratio": _calmar(final / initial_capital - 1, max_dd, len(returns), ppy),
+        "max_drawdown": round(drawdown, 6),
+        "sharpe_ratio": sharpe_ratio(returns, ppy),
+        "sortino_ratio": sortino_ratio(returns, ppy),
+        "calmar_ratio": calmar_ratio(final / initial_capital - 1, drawdown, len(returns), ppy),
         "trade_count": len(completed),
         "win_rate": round(wins / len(completed), 6) if completed else 0.0,
         "avg_trade_return": round(fmean([s["price"] / b["price"] - 1 for b, s in completed]), 6) if completed else 0.0,
+        "trade_returns": signed_trade_returns(completed),
     }
 
 
-def run_smc_ict(candles: list[dict], parameters: dict) -> dict:
+def run_smc_ict(candles: list[dict], parameters: dict,
+    trades_out: list[dict] | None = None,
+) -> dict:
     from .smc_ict import generate_signal
     ic = parameters["initial_capital"]
     alloc = parameters["allocation"]
@@ -86,6 +71,9 @@ def run_smc_ict(candles: list[dict], parameters: dict) -> dict:
     sl, tp, trail, hi = 0.0, 0.0, 0.0, 0.0
     trades, eq_curve = [], []
     atr = _compute_atr(candles)
+    # Bar the position was filled on. Stops and targets may only be evaluated
+    # from the following bar onwards.
+    fill_idx = -1
     for idx in range(lb, len(candles)):
         c, h, lo = candles[idx]["close"], candles[idx]["high"], candles[idx]["low"]
         win = candles[max(0, idx - lb):idx + 1]
@@ -93,37 +81,58 @@ def run_smc_ict(candles: list[dict], parameters: dict) -> dict:
         if qty > 0:
             hi = max(hi, h)
             trail = hi - atr_mult * atr[idx]
-        if sig["action"] == "buy" and sig["score"] >= min_score and qty == 0:
-            ov = cash * alloc
-            ep = c * (1 + slip)
-            f = ov * fee
-            qty = (ov - f) / ep
-            cash -= ov
-            entry, hi = ep, h
-            sl = sig.get("stop_loss") or (entry * 0.97)
-            tp = sig.get("take_profit") or (entry * 1.06)
-            trail = entry - atr_mult * atr[idx]
-            trades.append({"side": "buy", "price": ep, "time": candles[idx]["close_time"], "fee": f, "score": sig["score"]})
-        elif qty > 0 and (lo <= sl or h >= tp or c < trail or sig["action"] == "sell"):
-            if lo <= sl:
-                ep2 = sl
-            elif h >= tp:
-                ep2 = tp
+
+        # --- Exits evaluated on the bar AFTER the fill ---
+        if qty > 0 and idx > fill_idx:
+            hit = intrabar_exit_price(candles[idx], "buy", sl, tp)
+            if hit is not None:
+                ep2, reason = hit
+                # Intrabar trigger: the stop/target was armed on an earlier bar,
+                # so the last bar known before this one is idx - 1.
+                sig_idx, fill_i = idx - 1, idx
+            elif c < trail:
+                ep2, reason = trail, "trailing"
+                sig_idx, fill_i = idx - 1, idx
             elif sig["action"] == "sell":
-                ep2 = c * (1 - slip)
+                ep2 = fill_price(candles, idx, "sell", slip)
+                reason = "signal"
+                sig_idx, fill_i = idx, idx + 1
             else:
-                ep2 = trail
-            proceeds = qty * ep2
-            f2 = proceeds * fee
-            cash += proceeds - f2
-            trades.append({"side": "sell", "price": ep2, "time": candles[idx]["close_time"], "fee": f2})
-            qty = 0.0
+                ep2 = None
+            if ep2 is not None:
+                proceeds = qty * ep2
+                f2 = proceeds * fee
+                cash += proceeds - f2
+                trades.append({"side": "sell", "price": ep2, "time": candles[fill_i]["close_time"], "fee": f2, "signal_index": sig_idx, "fill_index": fill_i, "exit_reason": reason})
+                qty = 0.0
+
+        # --- Entry: decided on bar idx, filled at the NEXT bar's open ---
+        if sig["action"] == "buy" and sig["score"] >= min_score and qty == 0:
+            ep = fill_price(candles, idx, "buy", slip)
+            if ep is not None:
+                ov = cash * alloc
+                f = ov * fee
+                qty = (ov - f) / ep
+                cash -= ov
+                entry = ep
+                hi = candles[idx + 1]["high"]
+                sl = sig.get("stop_loss") or (entry * 0.97)
+                tp = sig.get("take_profit") or (entry * 1.06)
+                trail = entry - atr_mult * atr[idx]
+                fill_idx = idx + 1
+                trades.append({"side": "buy", "price": ep, "time": candles[idx + 1]["close_time"], "fee": f, "score": sig["score"], "signal_index": idx, "fill_index": idx + 1})
+
         eq_curve.append(cash + qty * c)
+    assert_no_lookahead(trades, candles)
+    if trades_out is not None:
+        trades_out.extend(trades)
     metrics = _compute_metrics(eq_curve, ic, trades, interval)
     return {"strategy": "smc_ict", **metrics}
 
 
-def run_multi_timeframe(candles: list[dict], parameters: dict) -> dict:
+def run_multi_timeframe(candles: list[dict], parameters: dict,
+    trades_out: list[dict] | None = None,
+) -> dict:
     from .multi_timeframe import analyze_multi_timeframe
     ic = parameters["initial_capital"]
     alloc = parameters["allocation"]
@@ -150,6 +159,7 @@ def run_multi_timeframe(candles: list[dict], parameters: dict) -> dict:
     trail, hi = 0.0, 0.0
     trades, eq_curve = [], []
     atr = _compute_atr(candles)
+    fill_idx = -1
     for idx in range(100, len(candles)):
         c, h = candles[idx]["close"], candles[idx]["high"]
         c1h = candles[max(0, idx - 100):idx + 1]
@@ -160,28 +170,47 @@ def run_multi_timeframe(candles: list[dict], parameters: dict) -> dict:
         if qty > 0:
             hi = max(hi, h)
             trail = hi - atr_mult * atr[idx]
+
+        if qty > 0 and idx > fill_idx:
+            if c < trail:
+                # Trailing stop: intrabar trigger on this bar, armed earlier.
+                ep2, sig_idx, fill_i = trail, idx - 1, idx
+            elif trend == "bearish":
+                # Signal decided on this bar -> filled at the next bar's open.
+                ep2, sig_idx, fill_i = fill_price(candles, idx, "sell", slip), idx, idx + 1
+            else:
+                ep2, sig_idx, fill_i = None, idx, idx
+            if ep2 is not None:
+                proceeds = qty * ep2
+                f2 = proceeds * fee
+                cash += proceeds - f2
+                trades.append({"side": "sell", "price": ep2, "time": candles[fill_i]["close_time"], "fee": f2, "signal_index": sig_idx, "fill_index": fill_i})
+                qty = 0.0
+
         if trend == "bullish" and score >= min_conf and qty == 0:
-            ov = cash * alloc
-            ep = c * (1 + slip)
-            f = ov * fee
-            qty = (ov - f) / ep
-            cash -= ov
-            entry, hi = ep, h
-            trail = entry - atr_mult * atr[idx]
-            trades.append({"side": "buy", "price": ep, "time": candles[idx]["close_time"], "fee": f, "score": score})
-        elif qty > 0 and (trend == "bearish" or c < trail):
-            ep2 = c * (1 - slip)
-            proceeds = qty * ep2
-            f2 = proceeds * fee
-            cash += proceeds - f2
-            trades.append({"side": "sell", "price": ep2, "time": candles[idx]["close_time"], "fee": f2})
-            qty = 0.0
+            ep = fill_price(candles, idx, "buy", slip)
+            if ep is not None:
+                ov = cash * alloc
+                f = ov * fee
+                qty = (ov - f) / ep
+                cash -= ov
+                entry = ep
+                hi = candles[idx + 1]["high"]
+                trail = entry - atr_mult * atr[idx]
+                fill_idx = idx + 1
+                trades.append({"side": "buy", "price": ep, "time": candles[idx + 1]["close_time"], "fee": f, "score": score, "signal_index": idx, "fill_index": idx + 1})
+
         eq_curve.append(cash + qty * c)
+    assert_no_lookahead(trades, candles)
+    if trades_out is not None:
+        trades_out.extend(trades)
     metrics = _compute_metrics(eq_curve, ic, trades, interval)
     return {"strategy": "multi_timeframe_confluence", **metrics}
 
 
-def run_multi_scale_crossover(candles: list[dict], parameters: dict) -> dict:
+def run_multi_scale_crossover(candles: list[dict], parameters: dict,
+    trades_out: list[dict] | None = None,
+) -> dict:
     from .indicators import multi_scale_crossover as msc_analyze
     ic = parameters["initial_capital"]
     alloc = parameters["allocation"]
@@ -196,6 +225,7 @@ def run_multi_scale_crossover(candles: list[dict], parameters: dict) -> dict:
     trail, hi = 0.0, 0.0
     trades, eq_curve = [], []
     atr = _compute_atr(candles)
+    fill_idx = -1
     for idx in range(50, len(candles)):
         c, h = candles[idx]["close"], candles[idx]["high"]
         win = candles[max(0, idx - 50):idx + 1]
@@ -203,23 +233,40 @@ def run_multi_scale_crossover(candles: list[dict], parameters: dict) -> dict:
         if qty > 0:
             hi = max(hi, h)
             trail = hi - atr_mult * atr[idx]
+
+        if qty > 0 and idx > fill_idx:
+            if c < trail:
+                # Trailing stop: intrabar trigger on this bar, armed earlier.
+                ep2, sig_idx, fill_i = trail, idx - 1, idx
+            elif msc["signal"] == "bearish":
+                # Signal decided on this bar -> filled at the next bar's open.
+                ep2, sig_idx, fill_i = fill_price(candles, idx, "sell", slip), idx, idx + 1
+            else:
+                ep2, sig_idx, fill_i = None, idx, idx
+            if ep2 is not None:
+                proceeds = qty * ep2
+                f2 = proceeds * fee
+                cash += proceeds - f2
+                trades.append({"side": "sell", "price": ep2, "time": candles[fill_i]["close_time"], "fee": f2, "signal_index": sig_idx, "fill_index": fill_i})
+                qty = 0.0
+
         if msc["signal"] == "bullish" and msc["score"] >= min_score and qty == 0:
-            ov = cash * alloc
-            ep = c * (1 + slip)
-            f = ov * fee
-            qty = (ov - f) / ep
-            cash -= ov
-            entry, hi = ep, h
-            trail = entry - atr_mult * atr[idx]
-            trades.append({"side": "buy", "price": ep, "time": candles[idx]["close_time"], "fee": f, "score": msc["score"]})
-        elif qty > 0 and (msc["signal"] == "bearish" or c < trail):
-            ep2 = c * (1 - slip)
-            proceeds = qty * ep2
-            f2 = proceeds * fee
-            cash += proceeds - f2
-            trades.append({"side": "sell", "price": ep2, "time": candles[idx]["close_time"], "fee": f2})
-            qty = 0.0
+            ep = fill_price(candles, idx, "buy", slip)
+            if ep is not None:
+                ov = cash * alloc
+                f = ov * fee
+                qty = (ov - f) / ep
+                cash -= ov
+                entry = ep
+                hi = candles[idx + 1]["high"]
+                trail = entry - atr_mult * atr[idx]
+                fill_idx = idx + 1
+                trades.append({"side": "buy", "price": ep, "time": candles[idx + 1]["close_time"], "fee": f, "score": msc["score"], "signal_index": idx, "fill_index": idx + 1})
+
         eq_curve.append(cash + qty * c)
+    assert_no_lookahead(trades, candles)
+    if trades_out is not None:
+        trades_out.extend(trades)
     metrics = _compute_metrics(eq_curve, ic, trades, interval)
     return {"strategy": "multi_scale_crossover", **metrics}
 

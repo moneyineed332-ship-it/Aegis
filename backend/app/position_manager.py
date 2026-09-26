@@ -248,7 +248,8 @@ class PositionManager:
         account_balance: float,
         setup_type: str = "",
         timeframe: str = "",
-        session: str = ""
+        session: str = "",
+        trade_id: str = "",
     ) -> PositionUpdate:
         """
         Open a new position with ICT/SMC validation.
@@ -268,6 +269,9 @@ class PositionManager:
             setup_type: ICT/SMC setup type
             timeframe: Analysis timeframe
             session: Trading session
+            trade_id: OMS order id. Reusing it keeps the position manager and
+                the risk manager keyed on the same identifier, so closing the
+                position also settles the risk manager's open trade.
         
         Returns:
             PositionUpdate with action result
@@ -323,7 +327,10 @@ class PositionManager:
         
         # Create position
         self.position_counter += 1
-        position_id = f"pos_{self.position_counter:06d}"
+        # Prefer the OMS order id so risk manager, position manager and
+        # journal all reference the same trade. Fall back to a local id only
+        # when the caller did not supply one (manual/UI flows).
+        position_id = trade_id or f"pos_{self.position_counter:06d}"
         
         risk_amount = account_balance * cfg.risk_per_trade_pct
         

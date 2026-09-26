@@ -9,6 +9,8 @@ import math
 from statistics import fmean, stdev
 
 from .indicators import ema_series, rsi_series, atr_series, periods_per_year as _ppy
+from .execution_model import assert_no_lookahead, fill_price
+from .metrics_core import max_drawdown, sharpe_ratio, signed_trade_returns
 
 
 def _vwap(candles: list[dict]) -> list[float]:
@@ -37,7 +39,9 @@ def _pivot_points(high: float, low: float, close: float) -> dict:
     }
 
 
-def run_intraday(candles: list[dict], parameters: dict) -> dict:
+def run_intraday(candles: list[dict], parameters: dict,
+    trades_out: list[dict] | None = None,
+) -> dict:
     """Run VWAP + RSI intraday momentum strategy.
 
     Parameters:
@@ -91,6 +95,8 @@ def run_intraday(candles: list[dict], parameters: dict) -> dict:
     trades: list[dict] = []
     equity_curve: list[float] = []
     returns: list[float] = []
+    # Bar the position was filled on; no exit may trigger before it.
+    fill_idx = -1
 
     for index, candle in enumerate(candles):
         close = candle["close"]
@@ -113,72 +119,83 @@ def run_intraday(candles: list[dict], parameters: dict) -> dict:
         prev_close = candles[index - 1]["close"] if index > 0 else close
         pivots = _pivot_points(prev_high, prev_low, prev_close)
 
-        if quantity > 0 and short_quantity == 0:
+        # --- Long exit: decided on this bar, filled at the NEXT bar's open. ---
+        if quantity > 0 and short_quantity == 0 and index > fill_idx:
             hit_stop = close < stop_loss
             rsi_exit = rsi_vals[index] > rsi_ob
             vwap_exit = below_vwap and ema_bearish
-
             if hit_stop or rsi_exit or vwap_exit:
-                execution_price = close * (1 - slippage_rate)
-                proceeds = quantity * execution_price
-                fee = proceeds * fee_rate
-                cash += proceeds - fee
-                pnl = (execution_price - entry_price) / entry_price
-                trades.append({
-                    "side": "sell", "price": execution_price,
-                    "time": candle["close_time"], "fee": fee,
-                    "pnl_pct": round(pnl * 100, 3),
-                    "exit_reason": "stop_loss" if hit_stop else ("rsi_overbought" if rsi_exit else "vwap_cross"),
-                })
-                quantity = 0.0
+                execution_price = fill_price(candles, index, "sell", slippage_rate)
+                if execution_price is not None:
+                    proceeds = quantity * execution_price
+                    fee = proceeds * fee_rate
+                    cash += proceeds - fee
+                    pnl = (execution_price - entry_price) / entry_price
+                    trades.append({
+                        "side": "sell", "price": execution_price,
+                        "time": candles[index + 1]["close_time"], "fee": fee,
+                        "pnl_pct": round(pnl * 100, 3),
+                        "exit_reason": "stop_loss" if hit_stop else ("rsi_overbought" if rsi_exit else "vwap_cross"),
+                        "signal_index": index, "fill_index": index + 1,
+                    })
+                    quantity = 0.0
 
-        elif short_quantity > 0 and quantity == 0:
+        # --- Short exit, same rule. ---
+        elif short_quantity > 0 and quantity == 0 and index > fill_idx:
             hit_stop = close > stop_loss
             rsi_exit = rsi_vals[index] < rsi_os
             vwap_exit = above_vwap and ema_bullish
-
             if hit_stop or rsi_exit or vwap_exit:
-                buy_price = close * (1 + slippage_rate)
-                cost = short_quantity * buy_price
-                fee = cost * fee_rate
-                cash -= cost + fee  # Pay to cover the short
-                pnl = (entry_price - buy_price) / entry_price
-                trades.append({
-                    "side": "buy_to_cover", "price": buy_price,
-                    "time": candle["close_time"], "fee": fee,
-                    "pnl_pct": round(pnl * 100, 3),
-                    "exit_reason": "stop_loss" if hit_stop else ("rsi_oversold" if rsi_exit else "vwap_cross"),
-                })
-                short_quantity = 0.0
+                buy_price = fill_price(candles, index, "buy", slippage_rate)
+                if buy_price is not None:
+                    cost = short_quantity * buy_price
+                    fee = cost * fee_rate
+                    cash -= cost + fee  # Pay to cover the short
+                    pnl = (entry_price - buy_price) / entry_price
+                    trades.append({
+                        "side": "buy_to_cover", "price": buy_price,
+                        "time": candles[index + 1]["close_time"], "fee": fee,
+                        "pnl_pct": round(pnl * 100, 3),
+                        "exit_reason": "stop_loss" if hit_stop else ("rsi_oversold" if rsi_exit else "vwap_cross"),
+                        "signal_index": index, "fill_index": index + 1,
+                    })
+                    short_quantity = 0.0
 
+        # --- Entry: decided on this bar, filled at the NEXT bar's open. ---
         if quantity == 0 and short_quantity == 0:
             if above_vwap and ema_bullish and rsi_vals[index] > rsi_bull:
-                order_value = cash * allocation
-                execution_price = close * (1 + slippage_rate)
-                fee = order_value * fee_rate
-                quantity = (order_value - fee) / execution_price
-                cash -= order_value
-                entry_price = execution_price
-                stop_loss = entry_price - atr_stop_mult * atr_val
-                trades.append({
-                    "side": "buy", "price": execution_price,
-                    "time": candle["close_time"], "fee": fee,
-                    "stop_loss": round(stop_loss, 2),
-                })
+                execution_price = fill_price(candles, index, "buy", slippage_rate)
+                if execution_price is not None:
+                    order_value = cash * allocation
+                    fee = order_value * fee_rate
+                    quantity = (order_value - fee) / execution_price
+                    cash -= order_value
+                    entry_price = execution_price
+                    stop_loss = entry_price - atr_stop_mult * atr_val
+                    fill_idx = index + 1
+                    trades.append({
+                        "side": "buy", "price": execution_price,
+                        "time": candles[index + 1]["close_time"], "fee": fee,
+                        "stop_loss": round(stop_loss, 2),
+                        "signal_index": index, "fill_index": index + 1,
+                    })
 
             elif use_shorts and below_vwap and ema_bearish and rsi_vals[index] < rsi_bear:
-                order_value = cash * allocation
-                execution_price = close * (1 - slippage_rate)
-                fee = order_value * fee_rate
-                short_quantity = (order_value - fee) / execution_price
-                cash += order_value - fee  # Credit short proceeds
-                entry_price = execution_price
-                stop_loss = entry_price + atr_stop_mult * atr_val
-                trades.append({
-                    "side": "short", "price": execution_price,
-                    "time": candle["close_time"], "fee": fee,
-                    "stop_loss": round(stop_loss, 2),
-                })
+                execution_price = fill_price(candles, index, "sell", slippage_rate)
+                if execution_price is not None:
+                    order_value = cash * allocation
+                    fee = order_value * fee_rate
+                    short_quantity = (order_value - fee) / execution_price
+                    cash += order_value - fee  # Credit short proceeds
+                    entry_price = execution_price
+                    stop_loss = entry_price + atr_stop_mult * atr_val
+                    fill_idx = index + 1
+                    trades.append({
+                        "side": "short", "price": execution_price,
+                        "time": candles[index + 1]["close_time"], "fee": fee,
+                        "stop_loss": round(stop_loss, 2),
+                        "signal_index": index, "fill_index": index + 1,
+                    })
 
         equity = cash + quantity * close - short_quantity * close
         if equity_curve:
@@ -189,11 +206,10 @@ def run_intraday(candles: list[dict], parameters: dict) -> dict:
         raise ValueError("Not enough data to compute results.")
 
     final_equity = equity_curve[-1]
-    peak, max_drawdown = equity_curve[0], 0.0
-    for eq in equity_curve:
-        peak = max(peak, eq)
-        if peak > 0:
-            max_drawdown = min(max_drawdown, eq / peak - 1)
+    drawdown = max_drawdown(equity_curve)
+    assert_no_lookahead(trades, candles)
+    if trades_out is not None:
+        trades_out.extend(trades)
 
     completed = list(zip(trades[::2], trades[1::2]))
 
@@ -210,19 +226,19 @@ def run_intraday(candles: list[dict], parameters: dict) -> dict:
                ((s["side"] == "sell" and s["price"] > b["price"]) or
                 (s["side"] == "buy_to_cover" and s["price"] < b["price"])))
     ppy = _ppy(interval)
-    sharpe = (fmean(returns) / stdev(returns) * math.sqrt(ppy)
-              if len(returns) > 1 and stdev(returns) > 0 else 0.0)
+    sharpe = sharpe_ratio(returns, ppy)
 
     return {
         "final_equity": round(final_equity, 2),
         "total_return": round(final_equity / initial_capital - 1, 6),
-        "max_drawdown": round(max_drawdown, 6),
+        "max_drawdown": round(drawdown, 6),
         "sharpe_ratio": round(sharpe, 4),
         "trade_count": len(completed),
         "win_rate": round(wins / len(completed), 6) if completed else 0.0,
         "avg_trade_return": round(
             fmean([_pair_return(b, s) for b, s in completed]), 6
         ) if completed else 0.0,
+        "trade_returns": [_pair_return(b, s) for b, s in completed],
         "strategy": "intraday",
         "parameters_used": {
             "rsi_period": rsi_period, "ema_fast": ema_fast_period,

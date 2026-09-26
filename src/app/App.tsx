@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, useNavigate, useLocation, Navigate } from "react-router-dom";
-import { activateEmergencyStop, getDashboard, getSupervisor, refreshFearGreed, refreshFundingRates, refreshHistory, refreshMarketData, resumeSupervisor, type DashboardSnapshot, type SupervisorStatus } from "../lib/api";
+import { activateEmergencyStop, getDashboard, getSupervisor, refreshFearGreed, refreshFundingRates, refreshHistory, refreshMarketData, resumeSupervisor, hasAdminToken, clearAdminToken, type DashboardSnapshot, type SupervisorStatus } from "../lib/api";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import BackToTop from "./components/BackToTop";
+import AdminLogin from "./components/AdminLogin";
 import Sidebar from "./components/dashboard/Sidebar";
 import DashboardHero from "./components/dashboard/DashboardHero";
 import DashboardGrid from "./components/dashboard/DashboardGrid";
@@ -31,6 +32,7 @@ const SMCSection = lazy(() => import("./sections/SMCSection"));
 import {
   Activity,
   AlertTriangle,
+  LogOut,
   Menu,
 } from "lucide-react";
 
@@ -57,20 +59,29 @@ function PageTransition({ children }: { children: React.ReactNode }) {
 }
 
 // --- Routes ---
-function AppRoutes() {
+function AppRoutes({ authenticated, onAuthChange }: { authenticated: boolean; onAuthChange: () => void }) {
   const navigate = useNavigate();
   return (
     <Routes>
       <Route path="/" element={<PageTransition><Suspense fallback={<Skeleton className="h-screen" />}><LandingPage onEnter={() => navigate("/dashboard")} /></Suspense></PageTransition>} />
       <Route path="/dashboard" element={<Navigate to="/dashboard/overview" replace />} />
-      <Route path="/dashboard/:section" element={<PageTransition><DashboardLayout /></PageTransition>} />
+      <Route
+        path="/dashboard/:section"
+        element={
+          authenticated ? (
+            <PageTransition><DashboardLayout onLogout={onAuthChange} /></PageTransition>
+          ) : (
+            <AdminLogin onAuthenticated={onAuthChange} />
+          )
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
 
 // --- Dashboard Layout ---
-function DashboardLayout() {
+function DashboardLayout({ onLogout }: { onLogout: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
   const toast = useToast();
@@ -141,7 +152,7 @@ function DashboardLayout() {
     </div>
   ), [dashboard, loading, activeSection, handleNavigate, refreshDashboard]);
 
-  const sectionContent = useMemo(() => ({
+  const sectionContent = useMemo<Record<string, React.ReactNode>>(() => ({
     overview: overviewSection,
     portfolio: <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><PortfolioSection /></Suspense></ErrorBoundary>,
     risk: <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><RiskSection /></Suspense></ErrorBoundary>,
@@ -283,6 +294,14 @@ function DashboardLayout() {
                 >
                   RESUME
                 </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label="Verrouiller et effacer le token"
+                  onClick={() => { clearAdminToken(); onLogout(); }}
+                >
+                  <LogOut className="w-3 h-3" />
+                </Button>
               </div>
             </div>
           </header>
@@ -321,12 +340,20 @@ function DashboardLayout() {
 
 // --- Root ---
 export default function App() {
+  // The admin token lives in localStorage only, so authentication state must be
+  // re-read on mount instead of baked into a build-time variable.
+  const [authenticated, setAuthenticated] = useState(() => hasAdminToken());
+
+  const handleAuthChange = useCallback(() => {
+    setAuthenticated(hasAdminToken());
+  }, []);
+
   return (
     <ErrorBoundary>
       <ToastProvider>
         <AlertWebSocketProvider>
           <BrowserRouter>
-            <AppRoutes />
+            <AppRoutes authenticated={authenticated} onAuthChange={handleAuthChange} />
           </BrowserRouter>
         </AlertWebSocketProvider>
       </ToastProvider>

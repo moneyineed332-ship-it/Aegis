@@ -6,6 +6,8 @@ import {
   getPositionMonitor,
   closePosition,
   placeManualOrder,
+  getAdminToken,
+  type ManualOrderRequest,
   type PortfolioSummary,
   type PositionDetail,
   type PositionRiskAlert,
@@ -45,9 +47,8 @@ export default function PositionMonitorSection() {
   // WebSocket for live position updates
   useEffect(() => {
     const baseUrl = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/^http/, "ws");
-    const rawToken = localStorage.getItem("aegis_admin_token") || import.meta.env.VITE_ADMIN_TOKEN || "";
-    const token = rawToken.startsWith("ENC:") ? "" : rawToken;
-    const wsUrl = token ? `${baseUrl}/ws/positions?token=${token}` : `${baseUrl}/ws/positions`;
+    const token = getAdminToken();
+    const wsUrl = token ? `${baseUrl}/ws/positions?token=${encodeURIComponent(token)}` : `${baseUrl}/ws/positions`;
 
     let ws: WebSocket;
     let reconnectTimeout: ReturnType<typeof setTimeout>;
@@ -106,26 +107,27 @@ export default function PositionMonitorSection() {
         toastError("Quantite invalide");
         return;
       }
-      const params: Record<string, unknown> = {
+      const params: ManualOrderRequest = {
         symbol: orderSymbol,
         side: orderSide,
         order_type: orderType,
         quantity: qty,
       };
       if (orderType === "limit") {
-        params.limit_price = parseFloat(orderPrice);
-        if (isNaN(params.limit_price as number)) {
+        const limitPrice = parseFloat(orderPrice);
+        if (isNaN(limitPrice)) {
           toastError("Prix limite invalide");
           return;
         }
+        params.limit_price = limitPrice;
       }
-      const result = await placeManualOrder(params as Parameters<typeof placeManualOrder>[0]);
-      if ((result as Record<string, unknown>).status === "filled" || (result as Record<string, unknown>).status === "pending") {
+      const result = await placeManualOrder(params);
+      if (result.status === "filled" || result.status === "pending") {
         toastSuccess(`Ordre ${orderType} ${orderSide} ${orderSymbol} place`);
         setShowOrderForm(false);
         await fetchRest();
       } else {
-        toastError(`Ordre rejete: ${(result as Record<string, unknown>).reason ?? "inconnu"}`);
+        toastError(`Ordre rejete: ${result.reason ?? "inconnu"}`);
       }
     } catch (e) {
       toastError(`Erreur: ${e}`);

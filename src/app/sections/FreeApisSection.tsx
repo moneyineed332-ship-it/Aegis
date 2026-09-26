@@ -96,7 +96,7 @@ export default function FreeApisSection() {
               <div className="grid grid-cols-2 gap-2 sm:gap-4">
                 <div><div className="font-['Rajdhani'] text-lg sm:text-xl font-700 text-foreground">${(global.total_market_cap_usd / 1e12).toFixed(2)}T</div><div className="font-['Inter'] text-[12px] sm:text-[12px] text-muted-foreground">Market Cap</div></div>
                 <div><div className="font-['Rajdhani'] text-lg sm:text-xl font-700 text-foreground">{global.btc_dominance?.toFixed(1)}%</div><div className="font-['Inter'] text-[12px] sm:text-[12px] text-muted-foreground">BTC Dom.</div></div>
-                <div><div className="font-['Rajdhani'] text-lg sm:text-xl font-700 text-foreground">{(global.total_volume_usd / 1e9)?.toFixed(1)}B</div><div className="font-['Inter'] text-[12px] sm:text-[12px] text-muted-foreground">Volume 24h</div></div>
+                <div><div className="font-['Rajdhani'] text-lg sm:text-xl font-700 text-foreground">{global.total_volume_usd != null ? `${(global.total_volume_usd / 1e9).toFixed(1)}B` : "—"}</div><div className="font-['Inter'] text-[12px] sm:text-[12px] text-muted-foreground">Volume 24h</div></div>
                 <div><div className="font-['Rajdhani'] text-lg sm:text-xl font-700" style={{ color: (global.market_cap_change_24h ?? 0) > 0 ? "#22c55e" : "#ef4444" }}>{global.market_cap_change_24h?.toFixed(2)}%</div><div className="font-['Inter'] text-[12px] sm:text-[12px] text-muted-foreground">24h Change</div></div>
               </div>
             ) : <div className="space-y-3"><Skeleton className="h-3 w-full" /><Skeleton className="h-3 w-3/4" /><Skeleton className="h-3 w-5/6" /></div>}

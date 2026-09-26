@@ -273,3 +273,126 @@ class TestYahooResample:
     def test_unknown_symbol_empty(self):
         assert market_data._fetch_ohlcv_yahoo("FAKE", "1h", 10) == []
         assert market_data._fetch_forex_spot_yahoo("FAKE", "now") is None
+
+
+class TestPositionSizingUnits:
+    """The sizing helper takes a FRACTION, not a percentage.
+
+    A fraction was previously passed to a function expecting a percentage,
+    which sized every position 100x too small.
+    """
+
+    def test_fraction_matches_risk_budget(self):
+        from app.forex_indicators import calculate_forex_position_size
+
+        # 5000 EUR, 0.5% = 25 EUR budget, 20 pip SL on a 100k contract.
+        result = calculate_forex_position_size("EURUSD", 5000.0, 0.005, 1.1000, 1.0980)
+        assert result["sl_pips"] == pytest.approx(20.0)
+        assert result["risk_amount"] == pytest.approx(24.0, abs=1.0)
+        assert result["lots"] > 0.1
+
+    def test_large_account_not_undersized(self):
+        from app.forex_indicators import calculate_forex_position_size
+
+        result = calculate_forex_position_size("EURUSD", 500_000.0, 0.005, 1.1000, 1.0980)
+        assert result["lots"] == pytest.approx(12.5, abs=0.1)
+        assert result["risk_amount"] == pytest.approx(2500.0, rel=0.02)
+
+    def test_config_helper_uses_fraction(self):
+        from app.ict_config import calculate_position_size, get_instrument_config
+
+        cfg = get_instrument_config("EURUSD")
+        assert cfg.risk_per_trade_pct == 0.005
+        lots = calculate_position_size("EURUSD", 5000.0, 1.1000, 1.0980)
+        assert lots > 0.1, "position sizing collapsed to the broker minimum"
+
+    def test_double_capital_double_size(self):
+        from app.ict_config import calculate_position_size
+
+        # Large enough that 0.01-lot rounding does not distort the ratio.
+        small = calculate_position_size("EURUSD", 100_000.0, 1.1000, 1.0980)
+        large = calculate_position_size("EURUSD", 200_000.0, 1.1000, 1.0980)
+        assert small == pytest.approx(2.5, abs=0.02)
+        assert large == pytest.approx(small * 2, rel=0.01)
+
+
+class TestSmallAccountRiskGate:
+    """A 50 EUR account cannot respect 0.5% with a 0.01 lot minimum.
+
+    The gate must check the risk actually taken and stay honest about it
+    instead of either blocking every setup or silently oversizing.
+    """
+
+    def _manager(self, capital):
+        from app.ict_risk_manager import IctRiskManager
+        return IctRiskManager(initial_capital=capital)
+
+    def test_eurusd_trades_at_min_lot_with_reported_risk(self):
+        rm = self._manager(50.0)
+        status = rm.check_all_limits("EURUSD", 1.1000, 1.0980, 1.1040, "fixed_tp", None, "buy")
+        assert not any("trop petite" in r for r in status.blocking_reasons)
+        size = rm.calculate_position_size("EURUSD", 1.1000, 1.0980)
+        assert size == pytest.approx(0.01)
+
+    def test_xauusd_blocked_because_min_lot_risks_too_much(self):
+        rm = self._manager(50.0)
+        status = rm.check_all_limits("XAUUSD", 2650.0, 2640.0, 2670.0, "fixed_tp", None, "buy")
+        assert any("risque effectif" in r.lower() for r in status.blocking_reasons)
+
+    def test_large_account_accepts_theoretical_size(self):
+        rm = self._manager(50_000.0)
+        status = rm.check_all_limits("EURUSD", 1.1000, 1.0980, 1.1040, "fixed_tp", None, "buy")
+        assert not any("risque effectif" in r.lower() for r in status.blocking_reasons)
+
+
+class TestSharedTradeId:
+    """Risk manager and position manager must share one trade identifier."""
+
+    def test_position_manager_reuses_oms_order_id(self):
+        from app.position_manager import PositionManager
+        from app.ict_config import get_instrument_config
+
+        cfg = get_instrument_config("EURUSD")
+        pm = PositionManager(risk_manager=None)
+        update = pm.open_position(
+            instrument="EURUSD",
+            direction="buy",
+            entry_price=1.1000,
+            sl_price=1.0980,
+            tp_price=1.1060,
+            account_balance=5000.0,
+            trade_id="AEGIS-1700000000-1",
+        )
+        assert update.action == "open"
+        assert update.position_id == "AEGIS-1700000000-1"
+        assert cfg.min_rr_ratio > 0
+
+    def test_exit_settles_the_registered_trade(self):
+        from app.ict_risk_manager import IctRiskManager
+
+        rm = IctRiskManager(initial_capital=5000.0)
+        rm.register_trade_entry(
+            trade_id="AEGIS-1700000000-1",
+            instrument="EURUSD",
+            direction="buy",
+            entry_price=1.1000,
+            sl_price=1.0980,
+            tp_price=1.1060,
+            position_size=0.12,
+            risk_amount=24.0,
+            risk_pct=0.005,
+            rr_ratio=3.0,
+            session="London",
+            setup_type="ICT_SMC",
+        )
+        settled = rm.register_trade_exit("AEGIS-1700000000-1", 1.1060)
+        assert settled is not None
+        assert settled.pnl > 0
+        assert rm._open_trades == {}
+
+    def test_unknown_id_returns_none(self):
+        from app.ict_risk_manager import IctRiskManager
+
+        rm = IctRiskManager(initial_capital=5000.0)
+        assert rm.register_trade_exit("does-not-exist", 1.1000) is None
+

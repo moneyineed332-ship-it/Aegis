@@ -11,6 +11,9 @@ import logging
 import math
 from statistics import fmean, stdev
 
+from .execution_model import assert_no_lookahead, fill_price
+from .metrics_core import max_drawdown, periods_per_year, sharpe_ratio, signed_trade_returns, sortino_ratio
+
 logger = logging.getLogger(__name__)
 
 
@@ -107,20 +110,12 @@ def _compute_adx(candles: list[dict], period: int = 14) -> list[float]:
 
 
 def _periods_per_year(interval: str) -> int:
-    return {"5m": 105_120, "15m": 35_040, "1h": 8_760, "4h": 2_190, "1d": 365}.get(interval, 8_760)
+    return periods_per_year(interval)
 
 
-def _sortino_ratio(returns: list[float], ppy: int) -> float:
-    if len(returns) < 2:
-        return 0.0
-    downside = [r for r in returns if r < 0]
-    if len(downside) < 2:
-        return 0.0
-    ds = stdev(downside)
-    return round(fmean(returns) / ds * math.sqrt(ppy), 4) if ds > 0 else 0.0
-
-
-def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
+def run_mean_reversion(candles: list[dict], parameters: dict,
+    trades_out: list[dict] | None = None,
+) -> dict:
     """Enhanced mean reversion with regime filter, stop-loss, and optional shorts."""
     period = parameters["period"]
     entry_z = parameters["entry_z_score"]
@@ -152,6 +147,8 @@ def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
     trades: list[dict] = []
     equity_curve: list[float] = []
     returns: list[float] = []
+    # Bar the position was filled on; no exit may trigger before it.
+    fill_idx = -1
 
     for offset, (lower_band, upper_band, mid) in enumerate(bands):
         index = offset + period - 1
@@ -177,45 +174,49 @@ def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
         if short_quantity > 0 and use_stop_loss:
             stop_loss = entry_price + atr_stop_mult * atr_series[index]
 
-        # LONG ENTRY: price below lower band (oversold)
-        if quantity == 0 and short_quantity == 0 and z_score <= entry_z:
-            order_value = cash * allocation
-            execution_price = close * (1 + slippage_rate)
-            fee = order_value * fee_rate
-            quantity = (order_value - fee) / execution_price
-            cash -= order_value
-            entry_price = execution_price
-            stop_loss = entry_price - atr_stop_mult * atr_series[index]
-            trades.append({"side": "buy", "price": execution_price, "time": candles[index]["close_time"], "fee": fee, "z_score": z_score})
+        # --- Exits: a decision on this bar is filled at the NEXT bar's open. ---
+        if quantity > 0 and index > fill_idx and (z_score >= exit_z or (use_stop_loss and close < stop_loss)):
+            execution_price = fill_price(candles, index, "sell", slippage_rate)
+            if execution_price is not None:
+                proceeds = quantity * execution_price
+                fee = proceeds * fee_rate
+                cash += proceeds - fee
+                trades.append({"side": "sell", "price": execution_price, "time": candles[index + 1]["close_time"], "fee": fee, "z_score": z_score, "signal_index": index, "fill_index": index + 1})
+                quantity = 0.0
 
-        # LONG EXIT: z-score reverts to SMA OR stop-loss hit
-        elif quantity > 0 and (z_score >= exit_z or (use_stop_loss and close < stop_loss)):
-            execution_price = close * (1 - slippage_rate)
-            proceeds = quantity * execution_price
-            fee = proceeds * fee_rate
-            cash += proceeds - fee
-            trades.append({"side": "sell", "price": execution_price, "time": candles[index]["close_time"], "fee": fee, "z_score": z_score})
-            quantity = 0.0
+        elif short_quantity > 0 and index > fill_idx and (z_score <= exit_z or (use_stop_loss and close > stop_loss)):
+            execution_price = fill_price(candles, index, "buy", slippage_rate)
+            if execution_price is not None:
+                cost = short_quantity * execution_price
+                fee = cost * fee_rate
+                cash -= cost + fee  # Pay to cover the short
+                trades.append({"side": "cover", "price": execution_price, "time": candles[index + 1]["close_time"], "fee": fee, "z_score": z_score, "signal_index": index, "fill_index": index + 1})
+                short_quantity = 0.0
 
-        # SHORT ENTRY: price above upper band (overbought)
+        # --- Entries: decided on this bar, filled at the NEXT bar's open. ---
+        elif quantity == 0 and short_quantity == 0 and z_score <= entry_z:
+            execution_price = fill_price(candles, index, "buy", slippage_rate)
+            if execution_price is not None:
+                order_value = cash * allocation
+                fee = order_value * fee_rate
+                quantity = (order_value - fee) / execution_price
+                cash -= order_value
+                entry_price = execution_price
+                stop_loss = entry_price - atr_stop_mult * atr_series[index]
+                fill_idx = index + 1
+                trades.append({"side": "buy", "price": execution_price, "time": candles[index + 1]["close_time"], "fee": fee, "z_score": z_score, "signal_index": index, "fill_index": index + 1})
+
         elif go_short and short_quantity == 0 and quantity == 0 and z_score >= short_entry_z:
-            short_value = cash * allocation
-            execution_price = close * (1 - slippage_rate)
-            fee = short_value * fee_rate
-            short_quantity = (short_value - fee) / execution_price
-            cash += short_value - fee  # Credit short proceeds
-            entry_price = execution_price
-            stop_loss = entry_price + atr_stop_mult * atr_series[index]
-            trades.append({"side": "short", "price": execution_price, "time": candles[index]["close_time"], "fee": fee, "z_score": z_score})
-
-        # SHORT EXIT: z-score reverts to SMA OR stop-loss hit
-        elif short_quantity > 0 and (z_score <= exit_z or (use_stop_loss and close > stop_loss)):
-            execution_price = close * (1 + slippage_rate)
-            cost = short_quantity * execution_price
-            fee = cost * fee_rate
-            cash -= cost + fee  # Pay to cover the short
-            trades.append({"side": "cover", "price": execution_price, "time": candles[index]["close_time"], "fee": fee, "z_score": z_score})
-            short_quantity = 0.0
+            execution_price = fill_price(candles, index, "sell", slippage_rate)
+            if execution_price is not None:
+                short_value = cash * allocation
+                fee = short_value * fee_rate
+                short_quantity = (short_value - fee) / execution_price
+                cash += short_value - fee  # Credit short proceeds
+                entry_price = execution_price
+                stop_loss = entry_price + atr_stop_mult * atr_series[index]
+                fill_idx = index + 1
+                trades.append({"side": "short", "price": execution_price, "time": candles[index + 1]["close_time"], "fee": fee, "z_score": z_score, "signal_index": index, "fill_index": index + 1})
 
         equity = cash + quantity * close - short_quantity * close
         if equity_curve:
@@ -226,10 +227,10 @@ def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
         return {"final_equity": initial_capital, "total_return": 0, "max_drawdown": 0, "sharpe_ratio": 0, "sortino_ratio": 0, "trade_count": 0, "win_rate": 0}
 
     final_equity = equity_curve[-1]
-    peak, max_drawdown = equity_curve[0], 0.0
-    for eq in equity_curve:
-        peak = max(peak, eq)
-        max_drawdown = min(max_drawdown, eq / peak - 1)
+    drawdown = max_drawdown(equity_curve)
+    assert_no_lookahead(trades, candles)
+    if trades_out is not None:
+        trades_out.extend(trades)
 
     completed = list(zip(trades[::2], trades[1::2]))
     def _is_win(t1, t2):
@@ -246,13 +247,13 @@ def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
         return (entry - t2["price"]) / entry
     wins = sum(1 for t1, t2 in completed if _is_win(t1, t2))
     ppy = _periods_per_year(interval)
-    sharpe = fmean(returns) / stdev(returns) * math.sqrt(ppy) if len(returns) > 1 and stdev(returns) > 0 else 0.0
-    sortino = _sortino_ratio(returns, ppy)
+    sharpe = sharpe_ratio(returns, ppy)
+    sortino = sortino_ratio(returns, ppy)
 
     return {
         "final_equity": round(final_equity, 2),
         "total_return": round(final_equity / initial_capital - 1, 6),
-        "max_drawdown": round(max_drawdown, 6),
+        "max_drawdown": round(drawdown, 6),
         "sharpe_ratio": round(sharpe, 4),
         "sortino_ratio": sortino,
         "trade_count": len(completed),
@@ -260,6 +261,7 @@ def run_mean_reversion(candles: list[dict], parameters: dict) -> dict:
         "avg_trade_return": round(
             fmean([_pair_return(t1, t2) for t1, t2 in completed]), 6
         ) if completed else 0.0,
+        "trade_returns": [_pair_return(t1, t2) for t1, t2 in completed],
     }
 
 

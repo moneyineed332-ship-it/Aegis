@@ -11,7 +11,7 @@ import {
   ChevronRight,
   Target,
 } from "lucide-react";
-import type { DashboardSnapshot } from "../../lib/api";
+import type { DashboardSnapshot } from "../../../lib/api";
 import { Card, CardHeader, Badge, EmptyState } from "../ui";
 import { useAlertWebSocket } from "../AlertWebSocketProvider";
 

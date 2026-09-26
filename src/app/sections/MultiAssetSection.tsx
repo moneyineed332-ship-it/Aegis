@@ -15,7 +15,7 @@ export default function MultiAssetSection() {
     await Promise.all([
       getAssetClasses().then(setAssetClasses).catch(() => setAssetClasses({})),
       getCommodityPrices().then(setCommodities).catch(() => setCommodities([])),
-      getForexRates().then(setForex).catch(() => setForex({})),
+      getForexRates().then(setForex).catch(() => setForex(null)),
     ]);
     setLastUpdated(new Date());
   };

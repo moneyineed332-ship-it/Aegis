@@ -55,7 +55,7 @@ export interface DashboardSnapshot {
   }>;
   data_quality: { valid: boolean; candle_count: number; gap_count: number; invalid_candle_count: number };
   market_analysis: { regime: { regime: string; confidence: number }; features: { momentum_20: number; volatility_20: number; rsi_14: number; macd: number; macd_signal: number; atr_14: number; bollinger_upper: number; bollinger_middle: number; bollinger_lower: number } } | null;
-  risk: { value_at_risk: number; conditional_value_at_risk: number; confidence: number; max_drawdown: number; max_drawdown_pct: number; volatility: number; annualized_volatility: number } | null;
+  risk: { value_at_risk: number; conditional_value_at_risk: number; confidence?: number; max_drawdown?: number; max_drawdown_pct: number; volatility?: number; annualized_volatility: number } | null;
   stress_test: { current_price: number; position_value: number; capital: number; worst_day_return: number; worst_week_return: number; worst_month_return: number; scenarios: Array<{ name: string; price_impact: number; portfolio_impact: number; description: string }> } | null;
   correlation: { symbols: string[]; matrix: Record<string, Record<string, number>>; avg_correlation: number | null; interpretation: string } | null;
   concentration: { total_exposure: number; herfindahl: number; max_concentration: number; position_count: number; positions: Array<{ symbol: string; value: number; weight: number }> } | null;
@@ -69,7 +69,7 @@ export interface DashboardSnapshot {
   open_interest: Array<{ symbol: string; open_interest: number; open_interest_usd: number; price: number; source: string; collected_at: string }>;
   memory: { total_episodes: number; strategies_used: Array<{ strategy: string; count: number; win_rate: number }>; avg_result: number | null; best_fingerprint: string | null };
   journal: { total_decisions: number; accuracy: number | null; avg_pnl: number | null; total_pnl: number | null; by_action: Record<string, { count: number; accuracy: number; avg_pnl: number | null }>; feedback: { message: string; grade: string; strengths: string[]; weaknesses: string[] } } | null;
-  market_snapshots: Array<{ id: number; symbol: string; price: number; source: string; collected_at: string }>;
+  market_snapshots?: Array<{ id: number; symbol: string; price: number; source: string; collected_at: string }>;
 }
 
 export interface SupervisorStatus {
@@ -141,70 +141,87 @@ export interface OMSOrder {
   created_at: string;
 }
 
+// Upstream payloads are frequently partial, so the numeric fields are optional
+// and the sections render "—". The property names below mirror free_apis.py.
 export interface CoingeckoGlobal {
-  total_market_cap_usd: number;
-  total_volume_usd: number;
-  btc_dominance: number;
-  market_cap_change_24h: number;
+  total_market_cap_usd?: number;
+  total_volume_usd?: number;
+  btc_dominance?: number;
+  eth_dominance?: number;
+  active_cryptos?: number;
+  markets?: number;
+  market_cap_change_24h?: number;
+  error?: string;
 }
 
 export interface CoingeckoTrending {
-  symbol: string;
   name: string;
-  market_cap_rank: number;
-  price_btc: number;
+  symbol: string;
+  market_cap_rank?: number;
+  score?: number;
 }
 
 export interface CoingeckoGainerLoser {
   symbol: string;
   name: string;
-  change_24h: number;
-  price_usd: number;
+  price?: number;
+  change_24h?: number;
+  market_cap?: number;
+  volume?: number;
 }
 
 export interface DefillamaTVL {
-  total_tvl: number;
-  change_1d: number;
-  change_7d: number;
+  total_tvl?: number;
+  prev_tvl?: number;
+  change_pct?: number;
+  error?: string;
 }
 
 export interface DefillamaYield {
+  pool?: string;
   project: string;
   symbol: string;
-  tvl: number;
-  apy: number;
-  apyBase: number;
-  apyReward: number;
-  chain: string;
+  chain?: string;
+  tvl_usd?: number;
+  apy?: number;
+  apy_base?: number;
+  apy_reward?: number;
+  il_risk?: string;
+  stablecoin?: string;
 }
 
 export interface PerpFinderFunding {
   symbol: string;
-  funding_rate: number;
-  predicted_rate: number;
-  mark_price: number;
-  index_price: number;
+  exchange?: string;
+  rate?: number;
+  rate_annualized?: number;
+  next_funding?: number;
 }
 
 export interface PerpFinderLiquidation {
   symbol: string;
-  side: string;
-  quantity: number;
-  price: number;
-  value_usd: number;
-  timestamp: string;
+  total_24h?: number;
+  longs?: number;
+  shorts?: number;
+  dominant?: string;
 }
 
 export interface MempoolFees {
-  recommended: { fast: number; halfHour: number; hour: number; economy: number };
+  fastest_fee?: number;
+  half_hour_fee?: number;
+  hour_fee?: number;
+  economy_fee?: number;
+  minimum_fee?: number;
+  error?: string;
 }
 
 export interface PolymarketCrypto {
   question: string;
-  slug: string;
-  outcomes: string[];
-  outcomePrices: string[];
-  volume24hr: number;
+  slug?: string;
+  outcomes?: string[];
+  outcome_prices?: string[];
+  volume?: number;
+  liquidity?: number;
 }
 
 // --- AI Types ---
@@ -369,11 +386,35 @@ if (!apiBaseUrl) {
   throw new Error("VITE_API_URL n'est pas défini. Ajoute-le dans le fichier .env à la racine du projet.");
 }
 
+const TOKEN_STORAGE_KEY = "aegis_admin_token";
+
 export function getAdminToken(): string {
-  const token = localStorage.getItem("aegis_admin_token") || import.meta.env.VITE_ADMIN_TOKEN || "";
+  // The admin token is NEVER baked into the bundle: it is entered by the
+  // operator at runtime and kept in localStorage. A VITE_* variable would be
+  // inlined into the public JS assets by the Vite build.
+  const token = localStorage.getItem(TOKEN_STORAGE_KEY) ?? "";
   // An ENC: blob can never authenticate from the browser (decryption key
   // is server-side) — treat as absent so the UI shows login state, not 401s.
   return token.startsWith("ENC:") ? "" : token;
+}
+
+export function setAdminToken(token: string): void {
+  localStorage.setItem(TOKEN_STORAGE_KEY, token.trim());
+}
+
+export function clearAdminToken(): void {
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
+export function hasAdminToken(): boolean {
+  return getAdminToken().length > 0;
+}
+
+export async function verifyAdminToken(token: string): Promise<boolean> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/auth/verify`, {
+    headers: token ? { "X-AEGIS-Admin-Token": token } : {},
+  });
+  return response.ok;
 }
 
 function getAdminHeaders(): Record<string, string> {
@@ -466,19 +507,20 @@ export const checkAlerts = () => postApi<{ alerts: Alert[] }>("/api/v1/alerts/ch
 
 // Phase 4: Advanced Backtesting
 export const runAdvancedWalkForward = (symbol: string = "BTCUSDT", nSplits: number = 3) =>
-  postApi(`/api/v1/backtests/advanced/walk-forward?symbol=${symbol}&n_splits=${nSplits}`);
+  postApi<WalkForwardResult>(`/api/v1/backtests/advanced/walk-forward?symbol=${symbol}&n_splits=${nSplits}`);
 export const runMonteCarlo = (symbol: string = "BTCUSDT", nSimulations: number = 1000) =>
-  postApi(`/api/v1/backtests/advanced/monte-carlo?symbol=${symbol}&n_simulations=${nSimulations}`);
+  postApi<MonteCarloResult>(`/api/v1/backtests/advanced/monte-carlo?symbol=${symbol}&n_simulations=${nSimulations}`);
 export const runSensitivity = (symbol: string = "BTCUSDT", paramName: string = "fast_period") =>
   postApi(`/api/v1/backtests/advanced/sensitivity?symbol=${symbol}&param_name=${paramName}`);
 
 // SMC/ICT + Multi-Timeframe backtests
-export const runSmcIctBacktest = (symbol: string = "BTCUSDT", interval: string = "1h") =>
-  postApi(`/api/v1/backtests/smc-ict?symbol=${symbol}&interval=${interval}`);
-export const runMultiTimeframeBacktest = (symbol: string = "BTCUSDT", interval: string = "1h") =>
-  postApi(`/api/v1/backtests/multi-timeframe?symbol=${symbol}&interval=${interval}`);
-export const runMultiScaleCrossoverBacktest = (symbol: string = "BTCUSDT", interval: string = "1h") =>
-  postApi(`/api/v1/backtests/multi-scale-crossover?symbol=${symbol}&interval=${interval}`);
+// These three endpoints take a Pydantic request BODY, not query params.
+export const runSmcIctBacktest = (symbol: string = "EURUSD", interval: "1h" | "4h" = "1h") =>
+  postApi("/api/v1/backtests/smc-ict", { symbol, interval });
+export const runMultiTimeframeBacktest = (symbol: string = "EURUSD", interval: "1h" | "4h" = "1h") =>
+  postApi("/api/v1/backtests/multi-timeframe", { symbol, interval });
+export const runMultiScaleCrossoverBacktest = (symbol: string = "EURUSD", interval: "1h" | "4h" = "1h") =>
+  postApi("/api/v1/backtests/multi-scale-crossover", { symbol, interval });
 
 // SMC/ICT + Multi-Timeframe walk-forward
 export const runSmcIctWalkForward = (symbol: string = "BTCUSDT") =>
@@ -554,19 +596,19 @@ export const aiAnalyzeSentiment = () => postApi<AISentiment>("/api/v1/ai/analyze
 
 // Phase 5: Free APIs
 export const getCoingeckoGlobal = async () => {
-  return apiGet<{ total_market_cap_usd?: number; btc_dominance?: number; total_volume_usd?: number; market_cap_change_24h?: number }>("/api/v1/free/coingecko/global");
+  return apiGet<CoingeckoGlobal>("/api/v1/free/coingecko/global");
 };
 export const getCoingeckoTrending = async () => {
-  return apiGet<Array<{ symbol: string; market_cap_rank?: number }>>("/api/v1/free/coingecko/trending");
+  return apiGet<CoingeckoTrending[]>("/api/v1/free/coingecko/trending");
 };
 export const getCoingeckoGainers = async () => {
-  return apiGet<Array<{ symbol: string; change_24h?: number }>>("/api/v1/free/coingecko/gainers");
+  return apiGet<CoingeckoGainerLoser[]>("/api/v1/free/coingecko/gainers");
 };
 export const getCoingeckoLosers = async () => {
-  return apiGet<Array<{ symbol: string; change_24h?: number }>>("/api/v1/free/coingecko/losers");
+  return apiGet<CoingeckoGainerLoser[]>("/api/v1/free/coingecko/losers");
 };
 export const getDefillamaTVL = async () => {
-  return apiGet<{ total_tvl?: number; change_pct?: number }>("/api/v1/free/defillama/tvl");
+  return apiGet<DefillamaTVL>("/api/v1/free/defillama/tvl");
 };
 export const getDefillamaChains = async () => {
   return apiGet<DefillamaChain[]>("/api/v1/free/defillama/chains");
@@ -575,25 +617,25 @@ export const getDefillamaProtocols = async () => {
   return apiGet<DefillamaProtocol[]>("/api/v1/free/defillama/protocols");
 };
 export const getDefillamaYields = async () => {
-  return apiGet<Array<{ project: string; symbol: string; apy?: number }>>("/api/v1/free/defillama/yields");
+  return apiGet<DefillamaYield[]>("/api/v1/free/defillama/yields");
 };
 export const getPerpFinderFunding = async () => {
-  return apiGet<Array<{ symbol: string; rate?: number }>>("/api/v1/free/perpfinder/funding");
+  return apiGet<PerpFinderFunding[]>("/api/v1/free/perpfinder/funding");
 };
 export const getPerpFinderOI = async () => {
   return apiGet<PerpFinderOI[]>("/api/v1/free/perpfinder/open-interest");
 };
 export const getPerpFinderLiquidations = async () => {
-  return apiGet<Array<{ symbol: string; longs?: number; shorts?: number }>>("/api/v1/free/perpfinder/liquidations");
+  return apiGet<PerpFinderLiquidation[]>("/api/v1/free/perpfinder/liquidations");
 };
 export const getMempoolFees = async () => {
-  return apiGet<{ fastest_fee?: number; half_hour_fee?: number; hour_fee?: number }>("/api/v1/free/mempool/fees");
+  return apiGet<MempoolFees>("/api/v1/free/mempool/fees");
 };
 export const getDexScreenerTrending = async () => {
   return apiGet<DexScreenerPair[]>("/api/v1/free/dexscreener/trending");
 };
 export const getPolymarketCrypto = async () => {
-  return apiGet<Array<{ question: string; volume?: number }>>("/api/v1/free/polymarket/crypto");
+  return apiGet<PolymarketCrypto[]>("/api/v1/free/polymarket/crypto");
 };
 export const getFearGreedHistorical = async (limit: number = 30) => {
   return apiGet<FearGreedData[]>(`/api/v1/free/fear-greed/historical?limit=${limit}`);

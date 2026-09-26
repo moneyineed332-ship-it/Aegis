@@ -8,8 +8,9 @@ Improvements:
 """
 
 import logging
-import math
-from statistics import fmean, stdev
+from statistics import fmean
+
+from .metrics_core import max_drawdown, periods_per_year, sharpe_ratio, signed_trade_returns, sortino_ratio
 
 logger = logging.getLogger(__name__)
 
@@ -31,17 +32,7 @@ def _compute_atr(candles: list[dict], period: int = 14) -> list[float]:
 
 
 def _periods_per_year(interval: str) -> int:
-    return {"5m": 105_120, "15m": 35_040, "1h": 8_760, "4h": 2_190, "1d": 365}.get(interval, 8_760)
-
-
-def _sortino_ratio(returns: list[float], ppy: int) -> float:
-    if len(returns) < 2:
-        return 0.0
-    downside = [r for r in returns if r < 0]
-    if len(downside) < 2:
-        return 0.0
-    ds = stdev(downside)
-    return round(fmean(returns) / ds * math.sqrt(ppy), 4) if ds > 0 else 0.0
+    return periods_per_year(interval)
 
 
 def run_grid(candles: list[dict], parameters: dict) -> dict:
@@ -87,9 +78,13 @@ def run_grid(candles: list[dict], parameters: dict) -> dict:
             equity_curve.append(equity)
             continue
 
-        # Volatility-adaptive grid step
-        if use_atr_grid and atr_series[idx] > 0:
-            grid_step = atr_series[idx] * atr_mult * close / max(close, 1)
+        # Volatility-adaptive grid step. The ATR of bar idx-1 is used, never
+        # bar idx: the levels must be known before the bar whose close is
+        # checked against them, otherwise the step adapts to the very bar it
+        # is about to trade.
+        prior_atr = atr_series[idx - 1] if idx > 0 else 0.0
+        if use_atr_grid and prior_atr > 0:
+            grid_step = prior_atr * atr_mult
             grid_levels = [base_price + (i - half_grid) * grid_step for i in range(grid_count)]
 
         # Check buy levels
@@ -149,25 +144,23 @@ def run_grid(candles: list[dict], parameters: dict) -> dict:
         return {"final_equity": initial_capital, "total_return": 0, "max_drawdown": 0, "sharpe_ratio": 0, "sortino_ratio": 0, "trade_count": 0, "win_rate": 0}
 
     final_equity = equity_curve[-1]
-    peak, max_drawdown = equity_curve[0], 0.0
-    for eq in equity_curve:
-        peak = max(peak, eq)
-        max_drawdown = min(max_drawdown, eq / peak - 1)
+    drawdown = max_drawdown(equity_curve)
 
     completed = list(zip(trades[::2], trades[1::2]))
     wins = sum(1 for b, s in completed if s["side"] != "drawdown_exit" and s["price"] > b["price"])
     ppy = _periods_per_year(interval)
-    sharpe = fmean(returns) / stdev(returns) * math.sqrt(ppy) if len(returns) > 1 and stdev(returns) > 0 else 0.0
-    sortino = _sortino_ratio(returns, ppy)
+    sharpe = sharpe_ratio(returns, ppy)
+    sortino = sortino_ratio(returns, ppy)
 
     return {
         "final_equity": round(final_equity, 2),
         "total_return": round(final_equity / initial_capital - 1, 6),
-        "max_drawdown": round(max_drawdown, 6),
+        "max_drawdown": round(drawdown, 6),
         "sharpe_ratio": round(sharpe, 4),
         "sortino_ratio": sortino,
         "trade_count": len([t for t in trades if t["side"] != "drawdown_exit"]),
         "win_rate": round(wins / max(len(completed), 1), 6),
+        "trade_returns": signed_trade_returns(completed),
     }
 
 

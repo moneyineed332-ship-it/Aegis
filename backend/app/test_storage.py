@@ -145,6 +145,55 @@ class TestKillSwitch:
         storage.set_kill_switch(False, "Resume")
         assert storage.get_kill_switch() is False
 
+    def test_missing_row_fails_closed(self):
+        """An unknown switch state must halt trading, never re-enable it."""
+        with storage.connection() as database:
+            database.execute("DELETE FROM system_controls WHERE name = 'kill_switch'")
+        assert storage.get_kill_switch() is True
+
+    def test_read_error_fails_closed(self, monkeypatch):
+        def boom():
+            raise RuntimeError("database locked")
+
+        monkeypatch.setattr(storage, "connection", boom)
+        assert storage.get_kill_switch() is True
+
+
+class TestCleanupStalePositions:
+    def _insert(self, symbol, price):
+        with storage.connection() as database:
+            database.execute(
+                "INSERT INTO positions (symbol, quantity, average_price) VALUES (?, ?, ?)",
+                (symbol, 1.0, price),
+            )
+
+    def test_keeps_forex_position_below_one(self):
+        """EURUSD trades near 1.08 — a low price is not corruption."""
+        self._insert("EURUSD", 1.0850)
+        assert storage.cleanup_stale_positions() == 0
+        assert [p["symbol"] for p in storage.list_positions()] == ["EURUSD"]
+
+    def test_keeps_microcap_position(self):
+        self._insert("SHIBUSDT", 0.00001234)
+        assert storage.cleanup_stale_positions() == 0
+        assert len(storage.list_positions()) == 1
+
+    def test_removes_zero_price(self):
+        self._insert("BTCUSDT", 0.0)
+        assert storage.cleanup_stale_positions() == 1
+        assert storage.list_positions() == []
+
+    def test_keeps_implausible_price_but_logs(self):
+        """A BTC quoted at 75 is suspicious, not grounds for silent deletion."""
+        self._insert("BTCUSDT", 75.0)
+        assert storage.cleanup_stale_positions() == 0
+        assert [p["symbol"] for p in storage.list_positions()] == ["BTCUSDT"]
+
+    def test_removes_non_normalized_symbol(self):
+        self._insert("BTC/USDT", 50000.0)
+        assert storage.cleanup_stale_positions() == 1
+        assert storage.list_positions() == []
+
 
 class TestEquityCurve:
     def test_empty_orders(self):
@@ -154,16 +203,70 @@ class TestEquityCurve:
 
     def test_with_orders(self):
         orders = [
-            {"id": 1, "side": "buy", "notional": 500, "created_at": "2025-01-01"},
-            {"id": 2, "side": "sell", "notional": 600, "created_at": "2025-01-02"},
+            {"id": 1, "symbol": "BTCUSDT", "side": "buy", "quantity": 0.01, "notional": 500, "fill_price": 50000, "created_at": "2025-01-01"},
+            {"id": 2, "symbol": "BTCUSDT", "side": "sell", "quantity": 0.01, "notional": 600, "fill_price": 60000, "created_at": "2025-01-02"},
         ]
         curve = storage.compute_equity_curve(10000, [], orders)
         assert len(curve) >= 2
 
-    def test_with_positions(self):
-        positions = [{"symbol": "BTCUSDT", "quantity": 0.1, "average_price": 50000}]
-        orders = [{"id": 1, "side": "buy", "notional": 5000, "created_at": "2025-01-01"}]
-        curve = storage.compute_equity_curve(10000, positions, orders)
+    def test_closed_trade_books_real_pnl_not_notional(self):
+        """A round trip must book the actual gain, not the traded notional."""
+        orders = [
+            {"id": 1, "symbol": "BTCUSDT", "side": "buy", "quantity": 0.01, "notional": 500, "fill_price": 50000, "created_at": "2025-01-01"},
+            {"id": 2, "symbol": "BTCUSDT", "side": "sell", "quantity": 0.01, "notional": 600, "fill_price": 60000, "created_at": "2025-01-02"},
+        ]
+        curve = storage.compute_equity_curve(10000, [], orders)
+        # (60000 - 50000) * 0.01 = +100
+        assert curve[-1]["equity"] == pytest.approx(10100, abs=0.01)
+
+    def test_losing_trade_reduces_equity(self):
+        orders = [
+            {"id": 1, "symbol": "BTCUSDT", "side": "buy", "quantity": 0.01, "notional": 500, "fill_price": 50000, "created_at": "2025-01-01"},
+            {"id": 2, "symbol": "BTCUSDT", "side": "sell", "quantity": 0.01, "notional": 400, "fill_price": 40000, "created_at": "2025-01-02"},
+        ]
+        curve = storage.compute_equity_curve(10000, [], orders)
+        assert curve[-1]["equity"] == pytest.approx(9900, abs=0.01)
+
+    def test_fees_are_charged(self):
+        base = [
+            {"id": 1, "symbol": "BTCUSDT", "side": "buy", "quantity": 0.01, "notional": 500, "fill_price": 50000, "created_at": "2025-01-01"},
+        ]
+        with_fee = [{**base[0], "fee": 2.5}]
+        curve = storage.compute_equity_curve(10000, [], base)
+        curve_fee = storage.compute_equity_curve(10000, [], with_fee)
+        assert curve[-1]["equity"] - curve_fee[-1]["equity"] == pytest.approx(2.5, abs=0.01)
+
+    def test_open_position_marked_to_market(self):
+        orders = [
+            {"id": 1, "symbol": "BTCUSDT", "side": "buy", "quantity": 0.01, "notional": 500, "fill_price": 50000, "created_at": "2025-01-01"},
+        ]
+        curve = storage.compute_equity_curve(10000, [], orders, {"BTCUSDT": 55000})
+        # (55000 - 50000) * 0.01 = +50 on the final, live-marked point
+        assert curve[-1]["equity"] == pytest.approx(10050, abs=0.01)
+
+    def test_historical_points_use_their_own_price(self):
+        """A current mark must not retroactively rewrite past points."""
+        orders = [
+            {"id": 1, "symbol": "BTCUSDT", "side": "buy", "quantity": 0.02, "notional": 1000, "fill_price": 50000, "created_at": "2025-01-01"},
+        ]
+        curve = storage.compute_equity_curve(10000, [], orders, {"BTCUSDT": 60000})
+        assert curve[1]["equity"] == 10000
+        assert curve[-1]["equity"] == pytest.approx(10200, abs=0.01)
+
+    def test_partial_close_keeps_basis(self):
+        orders = [
+            {"id": 1, "symbol": "BTCUSDT", "side": "buy", "quantity": 0.02, "notional": 1000, "fill_price": 50000, "created_at": "2025-01-01"},
+            {"id": 2, "symbol": "BTCUSDT", "side": "sell", "quantity": 0.01, "notional": 600, "fill_price": 60000, "created_at": "2025-01-02"},
+        ]
+        curve = storage.compute_equity_curve(10000, [], orders, {"BTCUSDT": 60000})
+        # realized (60000-50000)*0.01 = +100, remaining 0.01 @ basis 50000 marked 60000 = +100
+        assert curve[-1]["equity"] == pytest.approx(10200, abs=0.01)
+
+    def test_order_without_price_is_skipped(self):
+        orders = [
+            {"id": 1, "symbol": "BTCUSDT", "side": "buy", "quantity": 0.01, "notional": 500, "created_at": "2025-01-01"},
+        ]
+        curve = storage.compute_equity_curve(10000, [], orders)
         assert curve[-1]["equity"] == 10000
 
 

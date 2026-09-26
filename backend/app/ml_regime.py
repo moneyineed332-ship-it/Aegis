@@ -9,32 +9,12 @@ No sklearn dependency — implements logistic regression from scratch with:
 
 import json
 import math
-import random
-from statistics import fmean, stdev
+from statistics import fmean
 
 from . import storage as _storage
 
 
 LABELS = ["bull_trend", "bear_trend", "range", "high_volatility", "low_volatility", "capitulation", "euphoria"]
-
-
-def _normalize(values: list[float]) -> list[float]:
-    min_val = min(values)
-    max_val = max(values)
-    if max_val == min_val:
-        return [0.5] * len(values)
-    return [(v - min_val) / (max_val - min_val) for v in values]
-
-
-def _standardize(values: list[float]) -> list[float]:
-    """Z-score standardization — better for gradient descent convergence."""
-    if len(values) < 2:
-        return [0.0] * len(values)
-    mean = fmean(values)
-    std = stdev(values)
-    if std == 0:
-        return [0.0] * len(values)
-    return [(v - mean) / std for v in values]
 
 
 class SimpleClassifier:
@@ -149,6 +129,7 @@ class RegimePredictor:
         self._importance: dict[str, float] = {}
         self._trained = False
         self._metrics: dict = {}
+        self._scaler: dict | None = None
 
     def _extract_features(self, features: dict) -> list[float]:
         close = features.get("close", 1)
@@ -165,27 +146,86 @@ class RegimePredictor:
         williams_r = (features.get("williams_r", -50) + 50) / 50
         zscore = features.get("zscore_20", 0) / 3
 
-        return _normalize([
+        # Raw values. Scaling is applied per-feature across the TRAINING SET by
+        # the fitted scaler, not across the features of this single sample.
+        # Min-max scaling a row against itself forces all 12 inputs into
+        # [0, 1] by construction, which made them near-perfectly correlated
+        # and left the classifier with almost no between-sample variance.
+        return [
             sma_ratio, momentum, volatility, range_ratio,
             rsi, macd_hist, atr_ratio, bollinger_width,
             adx, stoch_rsi_k, williams_r, zscore,
-        ])
+        ]
 
-    def train(self, feature_sets: list[dict], regime_labels: list[str], epochs: int = 200, test_split: float = 0.2):
-        """Train with train/test split and compute metrics on held-out data."""
+    def _fit_scaler(self, rows: list[list[float]]) -> None:
+        """Fit a per-feature min-max scaler on the training rows."""
+        n_features = len(self.feature_names)
+        mins = [0.0] * n_features
+        maxs = [0.0] * n_features
+        if not rows:
+            self._scaler = None
+            return
+        for i in range(n_features):
+            column = [row[i] for row in rows]
+            mins[i] = min(column)
+            maxs[i] = max(column)
+        self._scaler = {"min": mins, "max": maxs}
+
+    def _scale(self, row: list[float]) -> list[float]:
+        """Apply the fitted per-feature scaler; identity when unfitted."""
+        if not self._scaler:
+            return list(row)
+        mins = self._scaler["min"]
+        maxs = self._scaler["max"]
+        out = []
+        for value, low, high in zip(row, mins, maxs):
+            span = high - low
+            out.append(0.0 if span == 0 else (value - low) / span)
+        return out
+
+    def train(
+        self,
+        feature_sets: list[dict],
+        regime_labels: list[str],
+        epochs: int = 200,
+        test_split: float = 0.2,
+        embargo: int = 24,
+    ):
+        """Train on the past, evaluate on the future.
+
+        The split is chronological with an embargo gap, NOT a random shuffle.
+        Samples come from overlapping 50-candle windows and
+        ``regime.classify`` applies hysteresis, so adjacent labels form long
+        runs. A random split puts neighbours on both sides and reported
+        accuracy measures memorization of the rule rather than any predictive
+        skill.
+
+        Note that the label is ``regime.classify(features)`` on the same bar:
+        this model distills the rule-based classifier, it does not forecast it.
+        """
         if len(feature_sets) < 50:
             return {"status": "insufficient_data", "min_required": 50, "provided": len(feature_sets)}
 
-        X = [self._extract_features(f) for f in feature_sets]
+        X_raw = [self._extract_features(f) for f in feature_sets]
         label_to_idx = {label: i for i, label in enumerate(LABELS)}
         y = [label_to_idx.get(r, 5) for r in regime_labels]
 
-        # Shuffle and split
-        indices = list(range(len(X)))
-        random.seed(42)
-        random.shuffle(indices)
-        split = int(len(X) * (1 - test_split))
-        train_idx, test_idx = indices[:split], indices[split:]
+        # Chronological split with a purge gap at the boundary.
+        n = len(X_raw)
+        test_size = max(1, int(n * test_split))
+        embargo = max(0, min(embargo, test_size))
+        test_start = n - test_size
+        train_end = test_start - embargo
+
+        if train_end < 10:
+            return {"status": "insufficient_data", "min_required": 50, "provided": n, "reason": "not enough training rows after the embargo"}
+
+        train_idx = list(range(train_end))
+        test_idx = list(range(test_start, n))
+
+        # The scaler is fitted on the training rows only.
+        self._fit_scaler([X_raw[i] for i in train_idx])
+        X = [self._scale(row) for row in X_raw]
 
         X_train, y_train = [X[i] for i in train_idx], [y[i] for i in train_idx]
         X_test, y_test = [X[i] for i in test_idx], [y[i] for i in test_idx]
@@ -206,6 +246,8 @@ class RegimePredictor:
             "samples": len(X),
             "train_samples": len(X_train),
             "test_samples": len(X_test),
+            "embargo": embargo,
+            "split": "chronological_purged",
             "features": len(self.feature_names),
             "metrics": self._metrics,
         }
@@ -237,8 +279,11 @@ class RegimePredictor:
             f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
             per_class[label] = {"precision": round(precision, 4), "recall": round(recall, 4), "f1": round(f1, 4)}
 
-        # Macro F1
-        f1_scores = [v["f1"] for v in per_class.values() if v["f1"] > 0]
+        # Macro F1 averages over EVERY class, including the ones the model never
+        # predicts. Filtering out the zero scores rewarded a model that only
+        # ever emitted one label, which is exactly the failure this metric is
+        # meant to expose.
+        f1_scores = [v["f1"] for v in per_class.values()]
         macro_f1 = fmean(f1_scores) if f1_scores else 0
 
         self._metrics = {
@@ -276,7 +321,7 @@ class RegimePredictor:
                 "metrics": self._metrics,
             }
 
-        x = self._extract_features(features)
+        x = self._scale(self._extract_features(features))
         probs = self.model.predict_proba(x)
         best_regime = max(probs, key=probs.get)
         best_prob = probs[best_regime]
@@ -334,6 +379,9 @@ class RegimePredictor:
             "importance": self._importance,
             "trained": self._trained,
             "metrics": self._metrics,
+            # The scaler is part of the model: without it the weights would be
+            # applied to unscaled inputs after a restart.
+            "scaler": self._scaler,
         }
         _storage.save_ml_model(model_id, data)
 
@@ -347,6 +395,13 @@ class RegimePredictor:
             self._importance = data.get("importance", {})
             self._trained = data.get("trained", False)
             self._metrics = data.get("metrics", {})
+            scaler = data.get("scaler")
+            # A model persisted before the scaler existed is unusable: its
+            # weights were fitted on row-normalized inputs.
+            if not scaler:
+                self._trained = False
+                return False
+            self._scaler = scaler
             return self._trained
         except (KeyError, TypeError):
             return False

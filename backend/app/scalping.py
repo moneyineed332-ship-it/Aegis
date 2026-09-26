@@ -9,9 +9,13 @@ import math
 from statistics import fmean, stdev
 
 from .indicators import ema_series, rsi_series, atr_series, stochastic, periods_per_year as _ppy
+from .execution_model import assert_no_lookahead, fill_price, intrabar_exit_price
+from .metrics_core import max_drawdown, sharpe_ratio, signed_trade_returns
 
 
-def run_scalping(candles: list[dict], parameters: dict) -> dict:
+def run_scalping(candles: list[dict], parameters: dict,
+    trades_out: list[dict] | None = None,
+) -> dict:
     """Run EMA(3)/EMA(8) scalping strategy.
 
     Parameters:
@@ -72,6 +76,8 @@ def run_scalping(candles: list[dict], parameters: dict) -> dict:
     returns: list[float] = []
     trades_today = 0
     current_day = ""
+    # Bar the position was filled on: stops may not trigger before it.
+    fill_idx = -1
 
     for index, candle in enumerate(candles):
         close = candle["close"]
@@ -96,42 +102,55 @@ def run_scalping(candles: list[dict], parameters: dict) -> dict:
 
         atr_val = atr_vals[index] if atr_vals[index] > 0 else close * 0.005
 
-        if quantity == 0 and trades_today < max_trades_per_day:
-            if fast_cross_up and rsi_bullish and stoch_bullish:
-                order_value = cash * allocation
-                execution_price = close * (1 + slippage_rate)
-                fee = order_value * fee_rate
-                quantity = (order_value - fee) / execution_price
-                cash -= order_value
-                entry_price = execution_price
-                stop_loss = entry_price - atr_stop_mult * atr_val
-                take_profit = entry_price + atr_stop_mult * tp_ratio * atr_val
-                trades.append({
-                    "side": "buy", "price": execution_price,
-                    "time": candle["close_time"], "fee": fee,
-                    "stop_loss": round(stop_loss, 2),
-                    "take_profit": round(take_profit, 2),
-                })
-                trades_today += 1
-
-        elif quantity > 0:
-            hit_stop = close <= stop_loss
-            hit_tp = close >= take_profit
-            signal_exit = fast_cross_down and stoch_bearish
-
-            if hit_stop or hit_tp or signal_exit:
-                execution_price = close * (1 - slippage_rate)
+        # --- Exits: intrabar levels are only checked from the bar AFTER the
+        # fill, and a signal exit is filled at the next bar's open. ---
+        if quantity > 0 and index > fill_idx:
+            hit = intrabar_exit_price(candle, "buy", stop_loss, take_profit)
+            if hit is not None:
+                # Intrabar trigger: the levels were armed before this bar.
+                execution_price, reason, sig_idx, fill_i = hit[0], hit[1], index - 1, index
+            elif fast_cross_down and stoch_bearish:
+                # Signal decided on this bar -> filled at the next bar's open.
+                execution_price = fill_price(candles, index, "sell", slippage_rate)
+                reason, sig_idx, fill_i = "signal", index, index + 1
+            else:
+                execution_price = None
+                reason, sig_idx, fill_i = None, index, index
+            if execution_price is not None:
                 proceeds = quantity * execution_price
                 fee = proceeds * fee_rate
                 cash += proceeds - fee
                 pnl = (execution_price - entry_price) / entry_price
                 trades.append({
                     "side": "sell", "price": execution_price,
-                    "time": candle["close_time"], "fee": fee,
+                    "time": candles[fill_i]["close_time"], "fee": fee,
                     "pnl_pct": round(pnl * 100, 3),
-                    "exit_reason": "stop_loss" if hit_stop else ("take_profit" if hit_tp else "signal"),
+                    "exit_reason": reason,
+                    "signal_index": sig_idx, "fill_index": fill_i,
                 })
                 quantity = 0.0
+
+        # --- Entry: decided on this bar, filled at the NEXT bar's open. ---
+        if quantity == 0 and trades_today < max_trades_per_day:
+            if fast_cross_up and rsi_bullish and stoch_bullish:
+                execution_price = fill_price(candles, index, "buy", slippage_rate)
+                if execution_price is not None:
+                    order_value = cash * allocation
+                    fee = order_value * fee_rate
+                    quantity = (order_value - fee) / execution_price
+                    cash -= order_value
+                    entry_price = execution_price
+                    stop_loss = entry_price - atr_stop_mult * atr_val
+                    take_profit = entry_price + atr_stop_mult * tp_ratio * atr_val
+                    fill_idx = index + 1
+                    trades.append({
+                        "side": "buy", "price": execution_price,
+                        "time": candles[index + 1]["close_time"], "fee": fee,
+                        "stop_loss": round(stop_loss, 2),
+                        "take_profit": round(take_profit, 2),
+                        "signal_index": index, "fill_index": index + 1,
+                    })
+                    trades_today += 1
 
         equity = cash + quantity * close
         if equity_curve:
@@ -142,28 +161,27 @@ def run_scalping(candles: list[dict], parameters: dict) -> dict:
         raise ValueError("Pas de données suffisantes pour calculer les résultats.")
 
     final_equity = equity_curve[-1]
-    peak, max_drawdown = equity_curve[0], 0.0
-    for eq in equity_curve:
-        peak = max(peak, eq)
-        if peak > 0:
-            max_drawdown = min(max_drawdown, eq / peak - 1)
+    drawdown = max_drawdown(equity_curve)
+    assert_no_lookahead(trades, candles)
+    if trades_out is not None:
+        trades_out.extend(trades)
 
     completed = list(zip(trades[::2], trades[1::2]))
     wins = sum(1 for buy, sell in completed if sell["price"] > buy["price"])
     ppy = _ppy(interval)
-    sharpe = (fmean(returns) / stdev(returns) * math.sqrt(ppy)
-              if len(returns) > 1 and stdev(returns) > 0 else 0.0)
+    sharpe = sharpe_ratio(returns, ppy)
 
     return {
         "final_equity": round(final_equity, 2),
         "total_return": round(final_equity / initial_capital - 1, 6),
-        "max_drawdown": round(max_drawdown, 6),
+        "max_drawdown": round(drawdown, 6),
         "sharpe_ratio": round(sharpe, 4),
         "trade_count": len(completed),
         "win_rate": round(wins / len(completed), 6) if completed else 0.0,
         "avg_trade_return": round(
             fmean([s["price"] / b["price"] - 1 for b, s in completed]), 6
         ) if completed else 0.0,
+        "trade_returns": [s["price"] / b["price"] - 1 for b, s in completed],
         "strategy": "scalping",
         "parameters_used": {
             "ema_fast": ema_fast_period, "ema_slow": ema_slow_period,

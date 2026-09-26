@@ -238,51 +238,60 @@ class IctBacktester:
         backtest_trades: list[TradeRecord] = []
         
         # Process candles
+        #
+        # Look-ahead rule: a signal generated from ``candles[:i+1]`` cannot be
+        # filled at bar i's close. The signal is parked in ``pending`` and
+        # filled at bar i+1's open, with the SL and TP re-based by the same
+        # distance so the intended risk structure is preserved.
+        pending: dict | None = None
+        pending_index = -1
         for i, candle in enumerate(candles):
             if not (start_date <= _as_datetime(candle.get("time")) <= end_date):
                 continue
-            
-            # Update positions
-            self._update_positions(candle)
-            
-            # Generate signals based on ICT/SMC
-            signal = self._generate_ict_signal(instrument, candles[:i+1], parameters)
-            
-            if signal:
-                # Check if position can be opened
+
+            # --- Fill an entry decided on the previous bar ---
+            if pending is not None and i > pending_index:
+                signal = pending
+                pending = None
+                new_entry = candle["open"]
+                # Preserve the distances implied by the signal.
+                sl_offset = signal["sl_price"] - signal["entry_price"]
+                tp_offset = signal["tp_price"] - signal["entry_price"]
+                new_sl = new_entry + sl_offset
+                new_tp = new_entry + tp_offset
+
                 risk_status = self.risk_manager.check_all_limits(
                     instrument,
-                    signal["entry_price"],
-                    signal["sl_price"],
-                    signal["tp_price"],
+                    new_entry,
+                    new_sl,
+                    new_tp,
                     self.position_mode,
                     None,
                     signal["direction"]
                 )
-                
+
                 if risk_status.can_trade:
-                    # Open position
                     position_update = self.position_manager.open_position(
                         instrument=instrument,
                         direction=signal["direction"],
-                        entry_price=signal["entry_price"],
-                        sl_price=signal["sl_price"],
-                        tp_price=signal["tp_price"],
+                        entry_price=new_entry,
+                        sl_price=new_sl,
+                        tp_price=new_tp,
                         account_balance=self.risk_manager.current_equity,
                         setup_type=signal.get("setup_type", ""),
                         timeframe=signal.get("timeframe", ""),
-                        session=signal.get("session", "")
+                        session=signal.get("session", ""),
+                        trade_id=f"bt-{i}",
                     )
-                    
+
                     if position_update.action == "open":
-                        # Register with risk manager
                         self.risk_manager.register_trade_entry(
                             trade_id=position_update.position_id,
                             instrument=instrument,
                             direction=signal["direction"],
-                            entry_price=signal["entry_price"],
-                            sl_price=signal["sl_price"],
-                            tp_price=signal["tp_price"],
+                            entry_price=new_entry,
+                            sl_price=new_sl,
+                            tp_price=new_tp,
                             position_size=signal.get("position_size", 0.01),
                             risk_amount=signal.get("risk_amount", 0.0),
                             risk_pct=signal.get("risk_pct", 0.0),
@@ -291,7 +300,16 @@ class IctBacktester:
                             setup_type=signal.get("setup_type", ""),
                             mode=self.position_mode
                         )
-            
+
+            # --- Manage existing positions on this bar ---
+            self._update_positions(candle)
+
+            # --- Generate a signal for the NEXT bar ---
+            signal = self._generate_ict_signal(instrument, candles[:i + 1], parameters)
+            if signal and pending is None and i + 1 < len(candles):
+                pending = signal
+                pending_index = i
+
             # Update equity curve
             equity_curve.append((_as_datetime(candle.get("time")), self.risk_manager.current_equity))
 

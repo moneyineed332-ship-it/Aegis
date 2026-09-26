@@ -7,7 +7,7 @@ import {
   ArrowDownRight,
   Activity,
 } from "lucide-react";
-import type { DashboardSnapshot } from "../../lib/api";
+import type { DashboardSnapshot } from "../../../lib/api";
 
 interface ChartData {
   t: string;

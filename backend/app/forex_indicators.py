@@ -71,146 +71,37 @@ def calculate_pip_profit(
         "pip_value": pip_value,
         "contract_size": contract_size
     }
-
-
-# ============================================================
-# SPREAD ANALYSIS
-# ============================================================
-
-def calculate_spread_cost(
-    symbol: ForexInstrument,
-    spread_pips: float,
-    lots: float
-) -> float:
-    """
-    Calculate spread cost in currency.
-    
-    Args:
-        symbol: Forex instrument
-        spread_pips: Current spread in pips
-        lots: Position size in lots
-    
-    Returns:
-        Spread cost in account currency
-    """
-    cfg = get_instrument_config(symbol)
-    pip_value = cfg.pip_value
-    contract_size = cfg.contract_size
-    
-    # Spread cost = spread_pips * pip_value * contract_size * lots
-    spread_cost = spread_pips * pip_value * contract_size * lots
-    return round(spread_cost, 2)
-
-
-def is_spread_acceptable(
-    symbol: ForexInstrument,
-    current_spread_pips: float,
-    max_multiplier: float = 2.0
-) -> bool:
-    """
-    Check if current spread is acceptable.
-    
-    Args:
-        symbol: Forex instrument
-        current_spread_pips: Current spread in pips
-        max_multiplier: Maximum multiplier over typical spread
-    
-    Returns:
-        True if spread is acceptable
-    """
-    cfg = get_instrument_config(symbol)
-    typical_spread = cfg.typical_spread_pips
-    max_acceptable = typical_spread * max_multiplier
-    
-    return current_spread_pips <= max_acceptable
-
-
-# ============================================================
-# VOLATILITY FILTERS
-# ============================================================
-
-def check_volatility_filters(
-    symbol: ForexInstrument,
-    current_atr_pips: float
-) -> dict:
-    """
-    Check if volatility is within acceptable range for trading.
-    
-    Args:
-        symbol: Forex instrument
-        current_atr_pips: Current ATR in pips
-    
-    Returns:
-        dict with volatility status and recommendations
-    """
-    cfg = get_instrument_config(symbol)
-    min_atr = cfg.min_atr_pips
-    max_atr = cfg.max_atr_pips
-    
-    volatility_status = "normal"
-    recommendation = "trade_normal"
-    risk_adjustment = 1.0  # No adjustment
-    
-    if current_atr_pips < min_atr:
-        volatility_status = "low"
-        recommendation = "reduce_position_size"
-        risk_adjustment = 0.5  # Reduce risk by 50%
-    elif current_atr_pips > max_atr:
-        volatility_status = "high"
-        recommendation = "avoid_trading"
-        risk_adjustment = 0.0  # No trading
-    
-    # XAU/USD specific handling
-    if symbol == "XAUUSD":
-        if current_atr_pips > 500:  # Very high volatility for gold
-            volatility_status = "extreme"
-            recommendation = "avoid_trading"
-            risk_adjustment = 0.0
-    
-    return {
-        "status": volatility_status,
-        "recommendation": recommendation,
-        "risk_adjustment": risk_adjustment,
-        "current_atr_pips": current_atr_pips,
-        "min_atr_pips": min_atr,
-        "max_atr_pips": max_atr,
-        "within_range": min_atr <= current_atr_pips <= max_atr
-    }
-
-
-# ============================================================
-# POSITION SIZING
-# ============================================================
-
 def calculate_forex_position_size(
     symbol: ForexInstrument,
     account_balance: float,
-    risk_percent: float,
+    risk_fraction: float,
     entry_price: float,
     stop_loss_price: float
 ) -> dict:
     """
-    Calculate optimal position size based on risk percentage.
-    
+    Calculate optimal position size based on risk fraction.
+
     Args:
         symbol: Forex instrument
         account_balance: Account balance in EUR/USD
-        risk_percent: Risk percentage (e.g., 0.5 for 0.5%)
+        risk_fraction: Risk as a FRACTION of the balance, matching
+            IctConfig.risk_per_trade_pct (0.005 means 0.5%). Passing a
+            percentage such as 0.5 here would size the position 100x too small.
         entry_price: Entry price
         stop_loss_price: Stop loss price
-    
+
     Returns:
         dict with position size in lots and risk details
     """
     cfg = get_instrument_config(symbol)
-    
+
     # Calculate risk amount in currency
-    risk_amount = account_balance * (risk_percent / 100)
-    
+    risk_amount = account_balance * risk_fraction
+
     # Calculate stop loss distance in pips
     sl_distance = abs(entry_price - stop_loss_price)
     sl_pips = price_to_pips_forex(symbol, sl_distance)
-    
+
     if sl_pips == 0:
         return {
             "lots": 0.0,
@@ -218,21 +109,21 @@ def calculate_forex_position_size(
             "sl_pips": 0.0,
             "error": "Stop loss distance is zero"
         }
-    
+
     # Calculate position size
     # Position size = Risk Amount / (SL_Pips * Pip_Value * Contract_Size)
     pip_value = cfg.pip_value
     contract_size = cfg.contract_size
-    
+
     lots = risk_amount / (sl_pips * pip_value * contract_size)
-    
+
     # Round to standard lot size (0.01 minimum)
     lots = round(max(lots, 0.01), 2)
-    
+
     # Calculate actual risk with rounded lots
     actual_risk = sl_pips * pip_value * contract_size * lots
     actual_risk_percent = (actual_risk / account_balance) * 100
-    
+
     return {
         "lots": lots,
         "risk_amount": round(actual_risk, 2),
@@ -242,55 +133,6 @@ def calculate_forex_position_size(
         "pip_value": pip_value,
         "contract_size": contract_size
     }
-
-
-def validate_position_size(
-    symbol: ForexInstrument,
-    lots: float,
-    account_balance: float
-) -> dict:
-    """
-    Validate if position size is within acceptable limits.
-    
-    Args:
-        symbol: Forex instrument
-        lots: Position size in lots
-        account_balance: Account balance
-    
-    Returns:
-        dict with validation result
-    """
-    cfg = get_instrument_config(symbol)
-    
-    # Calculate notional value
-    pip_value = cfg.pip_value
-    contract_size = cfg.contract_size
-    # Approximate notional: lots * contract_size (simplified)
-    notional_value = lots * contract_size
-    
-    # Calculate leverage
-    leverage = notional_value / account_balance if account_balance > 0 else 0
-    
-    # Maximum reasonable leverage for retail Forex (typically 1:30 to 1:500)
-    max_leverage = 100  # Conservative limit
-    
-    is_valid = leverage <= max_leverage
-    warning = None
-    
-    if leverage > 50:
-        warning = "High leverage - consider reducing position size"
-    elif leverage > max_leverage:
-        warning = "Excessive leverage - position size too large"
-    
-    return {
-        "is_valid": is_valid,
-        "leverage": round(leverage, 2),
-        "notional_value": round(notional_value, 2),
-        "max_leverage": max_leverage,
-        "warning": warning
-    }
-
-
 # ============================================================
 # RISK/REWARD CALCULATIONS
 # ============================================================
@@ -392,74 +234,6 @@ def validate_sl_placement(
         "max_sl_atr": max_sl_atr,
         "warning": warning
     }
-
-
-# ============================================================
-# SESSION-SPECIFIC ADJUSTMENTS
-# ============================================================
-
-def get_session_adjustment(symbol: ForexInstrument, session: str) -> dict:
-    """
-    Get session-specific parameter adjustments.
-    
-    Different sessions may require different risk parameters:
-    - Asian session: Typically lower volatility, tighter spreads
-    - London session: Higher volatility, good for trend following
-    - New York session: High volatility, news events
-    - Overlap: Maximum volatility and opportunity
-    
-    Args:
-        symbol: Forex instrument
-        session: Session name (asian, london, new_york, overlap)
-    
-    Returns:
-        dict with parameter multipliers
-    """
-    base_config = {
-        "risk_multiplier": 1.0,
-        "atr_multiplier": 1.0,
-        "spread_tolerance": 2.0,
-        "position_size_multiplier": 1.0
-    }
-    
-    # Session-specific adjustments
-    if session == "asian":
-        base_config.update({
-            "risk_multiplier": 0.8,  # Reduce risk in quieter session
-            "atr_multiplier": 0.9,
-            "spread_tolerance": 1.5,  # Less tolerance for wide spreads
-            "position_size_multiplier": 0.8
-        })
-    elif session == "london":
-        base_config.update({
-            "risk_multiplier": 1.0,  # Normal risk
-            "atr_multiplier": 1.0,
-            "spread_tolerance": 2.0,
-            "position_size_multiplier": 1.0
-        })
-    elif session == "new_york":
-        base_config.update({
-            "risk_multiplier": 0.9,  # Slightly reduce due to news risk
-            "atr_multiplier": 1.1,
-            "spread_tolerance": 2.5,
-            "position_size_multiplier": 0.9
-        })
-    elif session == "overlap":
-        base_config.update({
-            "risk_multiplier": 1.1,  # Slightly increase in high opportunity session
-            "atr_multiplier": 1.2,
-            "spread_tolerance": 3.0,
-            "position_size_multiplier": 1.1
-        })
-    
-    # XAU/USD specific adjustments
-    if symbol == "XAUUSD":
-        base_config["risk_multiplier"] *= 0.8  # More conservative for gold
-        base_config["position_size_multiplier"] *= 0.7
-    
-    return base_config
-
-
 # ============================================================
 # FOREX-SPECIFIC TECHNICAL INDICATORS
 # ============================================================
@@ -505,81 +279,4 @@ def forex_atr(candles: list[dict], period: int = 14, symbol: ForexInstrument = "
         "atr_pips": round(atr_pips, 1),
         "atr_percentage": round(atr_percentage, 3),
         "current_price": current_price
-    }
-
-
-def forex_pivot_points(candles: list[dict], symbol: ForexInstrument = "EURUSD") -> dict:
-    """
-    Calculate Forex pivot points (Standard, Fibonacci, Camarilla).
-    
-    Args:
-        candles: OHLCV candles (need at least 1 previous day candle)
-        symbol: Forex instrument
-    
-    Returns:
-        dict with various pivot point calculations
-    """
-    if len(candles) < 1:
-        return {"error": "Insufficient data for pivot points"}
-    
-    # Use previous candle for pivot calculation
-    prev = candles[-1]
-    high = prev["high"]
-    low = prev["low"]
-    close = prev["close"]
-    
-    # Standard Pivot Points
-    pivot = (high + low + close) / 3
-    r1 = 2 * pivot - low
-    r2 = pivot + (high - low)
-    r3 = high + 2 * (pivot - low)
-    s1 = 2 * pivot - high
-    s2 = pivot - (high - low)
-    s3 = low - 2 * (high - pivot)
-    
-    # Fibonacci Pivot Points
-    fib_r1 = pivot + (high - low) * 0.382
-    fib_r2 = pivot + (high - low) * 0.618
-    fib_r3 = pivot + (high - low) * 1.0
-    fib_s1 = pivot - (high - low) * 0.382
-    fib_s2 = pivot - (high - low) * 0.618
-    fib_s3 = pivot - (high - low) * 1.0
-    
-    # Convert to pips
-    pip_value = get_pip_value(symbol)
-    
-    def to_pips(price):
-        return round(price / pip_value, 1)
-    
-    return {
-        "standard": {
-            "pivot": round(pivot, 5),
-            "r1": round(r1, 5),
-            "r2": round(r2, 5),
-            "r3": round(r3, 5),
-            "s1": round(s1, 5),
-            "s2": round(s2, 5),
-            "s3": round(s3, 5),
-        },
-        "fibonacci": {
-            "pivot": round(pivot, 5),
-            "r1": round(fib_r1, 5),
-            "r2": round(fib_r2, 5),
-            "r3": round(fib_r3, 5),
-            "s1": round(fib_s1, 5),
-            "s2": round(fib_s2, 5),
-            "s3": round(fib_s3, 5),
-        },
-        "in_pips": {
-            "pivot": to_pips(pivot),
-            "r1": to_pips(r1),
-            "r2": to_pips(r2),
-            "r3": to_pips(r3),
-            "s1": to_pips(s1),
-            "s2": to_pips(s2),
-            "s3": to_pips(s3),
-        },
-        "high": high,
-        "low": low,
-        "close": close
     }
