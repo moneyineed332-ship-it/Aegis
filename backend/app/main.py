@@ -16,6 +16,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from .rate_limit import limiter as _shared_limiter, LIVENESS_LIMIT
 
 from . import advisor, backtesting, backtesting_advanced, binance_testnet, coach, config, data_quality, deployment, engine, execution, features, journal, lab, learning, market_data, memory, ml_regime, multi_asset, oms, optimizer, position_monitor, regime, risk, security, storage, strategy_registry, supervisor
 from .routers import backtesting as backtesting_router, market as market_router, risk as risk_router, ai as ai_router, free_apis as free_apis_router
@@ -24,7 +25,7 @@ from . import metrics as app_metrics
 
 logger = logging.getLogger(__name__)
 
-limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+limiter = _shared_limiter
 
 
 @asynccontextmanager
@@ -72,8 +73,13 @@ app.add_middleware(SlowAPIMiddleware)
 
 
 @app.get("/health")
-async def root_health():
-    """Lightweight health check for Fly.io (no engine dependency)."""
+@limiter.limit(LIVENESS_LIMIT)
+async def root_health(request: Request):
+    """Lightweight health check for Fly.io (no engine dependency).
+
+    Exempt from the global rate limit: Fly polls this every 10s, and a 429 here
+    would be reported as an unhealthy machine and trigger a restart.
+    """
     return {"status": "ok", "service": "aegis-ai-quant"}
 app.add_middleware(
     CORSMiddleware,

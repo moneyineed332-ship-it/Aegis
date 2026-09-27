@@ -5,18 +5,24 @@ import shutil
 import time
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Response
-
+from fastapi import APIRouter, Depends, Request, Response
 from .. import config, engine, market_data, metrics, storage
 from ..deps import require_admin_token
+from ..rate_limit import limiter, LIVENESS_LIMIT
 
 router = APIRouter(prefix="/api/v1", tags=["market"])
 
 
 @router.get("/health")
-def health() -> dict:
-    """Basic health check — returns mode."""
+@limiter.limit(LIVENESS_LIMIT)
+def health(request: Request) -> dict:
+    """Basic health check — returns mode.
+
+    Exempt from the global rate limit: this is the liveness endpoint an
+    orchestrator polls, and a 429 here would be read as an unhealthy machine.
+    """
     return {"status": "ok", "mode": config.MODE}
+
 
 
 @router.get("/health/detailed", dependencies=[Depends(require_admin_token)])

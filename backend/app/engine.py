@@ -163,7 +163,10 @@ async def task_fetch_prices():
     """Fetch spot prices for all configured symbols."""
     global _last_prices
     try:
-        snapshots = market_data.fetch_spot_prices()
+        # Synchronous network I/O: run it in a worker thread so the event loop
+        # stays free. The orchestrator probes /health every 10s with a 5s
+        # timeout, and an inline call here can outlast that.
+        snapshots = await asyncio.to_thread(market_data.fetch_spot_prices)
         storage.save_market_snapshots(snapshots)
         _last_prices = {s["symbol"]: s["price"] for s in snapshots}
         storage.log_engine_event(_get_cycle_id(), "prices_fetched", {"count": len(snapshots)})
@@ -171,6 +174,7 @@ async def task_fetch_prices():
     except Exception as exc:
         storage.log_engine_event(_get_cycle_id(), "prices_error", {"error": str(exc)}, "error")
         raise
+
 
 
 # ============================================================
@@ -202,7 +206,12 @@ async def task_fetch_analysis():
                 for tf in timeframes:
                     # Convert MT5 format to standard format if needed
                     interval = TIMEFRAME_MAPPING.get(tf, tf.lower())
-                    candles = market_data.fetch_ohlcv(symbol, interval, limit=200)
+                    # Network I/O per timeframe: 3 symbols x 4 timeframes = 12
+                    # sequential blocking calls in this one task. Awaiting them
+                    # in a worker thread is what stops the loop from stalling.
+                    candles = await asyncio.to_thread(
+                        market_data.fetch_ohlcv, symbol, interval, limit=200
+                    )
                     if not candles:
                         continue
                     
@@ -309,7 +318,12 @@ async def _run_ict_pipeline() -> None:
             continue
 
         try:
-            signal, candles_m15 = _get_ict_signal(instrument, price)
+            # _get_ict_signal is synchronous: 4 timeframe fetches, 4 DB writes
+            # and the full indicator/structure computation per instrument. It
+            # takes no lock and returns values only, so it is safe to run off
+            # the event loop.
+            signal, candles_m15 = await asyncio.to_thread(_get_ict_signal, instrument, price)
+
             if signal is None:
                 storage.log_engine_event(_get_cycle_id(), "ict_no_signal", {
                     "instrument": instrument,

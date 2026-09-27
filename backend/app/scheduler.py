@@ -26,12 +26,26 @@ class ScheduledTask:
 
 
 class Scheduler:
-    """Async scheduler that runs tasks at fixed intervals."""
+    """Async scheduler that runs tasks at fixed intervals.
+
+    Task bodies are serialized on a single lock. Engine jobs share mutable
+    module state (prices, analyses, signals, the ICT position manager) and
+    ``monitor_positions`` ticks every 10s alongside ``execute_trades``; running
+    two of them at once could double-sell or double-count. The lock makes that
+    guarantee explicit instead of relying on the bodies happening to contain no
+    await points.
+
+    Serialization must not mean blocking the event loop: the task bodies perform
+    synchronous network and disk I/O, which is why they are awaited in a worker
+    thread (see ``_run_task``). Holding the lock across that await keeps the
+    jobs mutually exclusive while leaving the HTTP server free to answer.
+    """
 
     def __init__(self):
         self._tasks: dict[str, ScheduledTask] = {}
         self._running = False
         self._loop_task: asyncio.Task | None = None
+        self._run_lock = asyncio.Lock()
 
     def register(self, name: str, func: callable, interval: float) -> None:
         """Register a periodic task."""
@@ -99,10 +113,15 @@ class Scheduler:
     async def _run_task(self, task: ScheduledTask) -> None:
         """Execute a single task with error handling."""
         try:
-            if asyncio.iscoroutinefunction(task.func):
-                await task.func()
-            else:
-                task.func()
+            async with self._run_lock:
+                if asyncio.iscoroutinefunction(task.func):
+                    await task.func()
+                else:
+                    # A plain callable may be blocking I/O. Handing it to a
+                    # worker thread is what keeps the event loop responsive;
+                    # calling it inline would stall every concurrent request,
+                    # including the orchestrator's liveness probe.
+                    await asyncio.to_thread(task.func)
             task.error_count = 0
             task.last_error = None
         except asyncio.CancelledError:
