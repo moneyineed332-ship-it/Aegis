@@ -69,14 +69,21 @@ class TestICTConfig:
     def test_eurusd_config(self):
         cfg = get_instrument_config("EURUSD")
         assert cfg.pip_value == 0.0001
-        assert cfg.contract_size == 100_000
+        # Contract size is derived from the paper capital (see
+        # ict_config._apply_micro_contracts), so the invariant is that one
+        # minimum lot is an affordable fraction of the account, not that the
+        # contract is literally 100 000.
+        from app.ict_config import lots_to_units
+        notional = lots_to_units("EURUSD", 0.01) * 1.08
+        assert 0 < notional <= 75
         assert cfg.min_rr_ratio == 1.5
         assert cfg.risk_per_trade_pct == 0.005
 
     def test_xauusd_higher_volatility_params(self):
         cfg = get_instrument_config("XAUUSD")
+        from app.ict_config import lots_to_units
         assert cfg.pip_value == 0.01
-        assert cfg.contract_size == 100
+        assert lots_to_units("XAUUSD", 0.01) * 2650.0 <= 75
         assert cfg.max_atr_pips > get_instrument_config("EURUSD").max_atr_pips
         assert cfg.sl_atr_multiplier >= 2.0
 

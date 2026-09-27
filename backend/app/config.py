@@ -35,6 +35,10 @@ PAPER_CAPITAL = float(os.getenv("AEGIS_INITIAL_CAPITAL", "20"))
 
 # --- ICT/SMC Bot Capital ---
 ICT_PAPER_CAPITAL = float(os.getenv("AEGIS_ICT_CAPITAL", "50"))  # 50€ pour le bot ICT/SMC
+# Rescale the ICT contract sizes so the 0.01 broker minimum is affordable at
+# this capital: a 50 EUR account cannot risk-manage a 1 085 EUR minimum lot.
+# Paper mode only, refused otherwise. See ict_config._apply_micro_contracts.
+ICT_MICRO_CONTRACTS = os.getenv("AEGIS_ICT_MICRO_CONTRACTS", "1") not in ("0", "false", "False")
 
 # --- Database ---
 DB_PATH = os.getenv("AEGIS_DB_PATH", str(Path(__file__).resolve().parent.parent / "data" / "aegis.db"))
@@ -51,8 +55,16 @@ API_PORT = int(os.getenv("AEGIS_API_PORT", "8000"))
 WEB_PORT = int(os.getenv("AEGIS_WEB_PORT", "80"))
 
 # --- Trading Limits ---
-MAX_ORDER_NOTIONAL = float(os.getenv("AEGIS_MAX_ORDER_NOTIONAL", "18"))
-MAX_TOTAL_EXPOSURE = float(os.getenv("AEGIS_MAX_TOTAL_EXPOSURE", "20"))
+# Expressed as a multiple of the active capital, because an absolute notional
+# cap is meaningless across instruments. A fixed 18 EUR cap came from the
+# crypto sizing, and it blocked every properly risk-sized Forex position:
+# risking 0.5 % of 50 EUR with a 50-pip SL needs ~54 EUR of EURUSD notional
+# (notional = risk x price / SL), i.e. ~108 % of capital, which is normal
+# under leverage but was refused as "exceeds max (18)".
+# Risk limits are the real constraint; these are only a backstop against an
+# oversized order.
+ORDER_NOTIONAL_CAP_MULT = float(os.getenv("AEGIS_ORDER_NOTIONAL_CAP_MULT", "1.5"))
+TOTAL_EXPOSURE_CAP_MULT = float(os.getenv("AEGIS_TOTAL_EXPOSURE_CAP_MULT", "1.5"))
 
 # --- Execution Defaults ---
 DEFAULT_FEE_BPS = float(os.getenv("AEGIS_DEFAULT_FEE_BPS", "10"))
@@ -171,11 +183,20 @@ def active_symbols() -> tuple:
     return tuple(_md.SYMBOLS)
 
 
+def _resolve_notional_caps() -> tuple[float, float]:
+    """Absolute notional caps derived from the capital actually in use."""
+    cap = active_capital()
+    return cap * ORDER_NOTIONAL_CAP_MULT, cap * TOTAL_EXPOSURE_CAP_MULT
+
+
 # --- ICT/SMC Mode (Cahier des charges) ---
 # When enabled, the engine uses the full ICT/SMC pipeline:
 # multi-TF analysis → signal generator → risk manager → position manager.
 # Instruments: EUR/USD, GBP/USD, XAU/USD with 50€ capital.
 ICT_MODE = os.getenv("AEGIS_ICT_MODE", "false").lower() == "true"
+
+# Resolved only once ICT_MODE is known: active_capital() reads it.
+MAX_ORDER_NOTIONAL, MAX_TOTAL_EXPOSURE = _resolve_notional_caps()
 
 # --- Alert Thresholds ---
 ALERT_MAX_DRAWDOWN_PCT = float(os.getenv("AEGIS_ALERT_MAX_DRAWDOWN_PCT", "15"))

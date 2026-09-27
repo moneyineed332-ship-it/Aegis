@@ -295,8 +295,11 @@ class TestPositionSizingUnits:
         from app.forex_indicators import calculate_forex_position_size
 
         result = calculate_forex_position_size("EURUSD", 500_000.0, 0.005, 1.1000, 1.0980)
-        assert result["lots"] == pytest.approx(12.5, abs=0.1)
+        # The lot count depends on the contract size, which is derived from the
+        # paper capital, so it is not a stable magnitude. What must hold is that
+        # the risk budget is spent and the size is not clamped to the minimum.
         assert result["risk_amount"] == pytest.approx(2500.0, rel=0.02)
+        assert result["lots"] > 0.1
 
     def test_config_helper_uses_fraction(self):
         from app.ict_config import calculate_position_size, get_instrument_config
@@ -312,32 +315,65 @@ class TestPositionSizingUnits:
         # Large enough that 0.01-lot rounding does not distort the ratio.
         small = calculate_position_size("EURUSD", 100_000.0, 1.1000, 1.0980)
         large = calculate_position_size("EURUSD", 200_000.0, 1.1000, 1.0980)
-        assert small == pytest.approx(2.5, abs=0.02)
+        # The absolute lot count tracks the (capital-derived) contract size, so
+        # assert the ratio rather than a magnitude.
         assert large == pytest.approx(small * 2, rel=0.01)
 
 
 class TestSmallAccountRiskGate:
-    """A 50 EUR account cannot respect 0.5% with a 0.01 lot minimum.
+    """A 50 EUR account must be able to trade, and must not over-risk.
 
-    The gate must check the risk actually taken and stay honest about it
-    instead of either blocking every setup or silently oversizing.
+    This used to be the opposite: the standard 100 000 contract makes a 0.01
+    lot worth 1 085 EUR, so every setup was refused (effective risk 10-40 % of
+    equity against a 5 % cap) and XAUUSD could never trade at all. Contracts
+    are now derived from the paper capital, so the account can respect its own
+    risk limit. The gate still has to catch a genuinely oversized position,
+    which is what the last test pins.
     """
 
     def _manager(self, capital):
         from app.ict_risk_manager import IctRiskManager
         return IctRiskManager(initial_capital=capital)
 
-    def test_eurusd_trades_at_min_lot_with_reported_risk(self):
+    def test_eurusd_trades_and_sizes_to_the_risk_budget(self):
         rm = self._manager(50.0)
         status = rm.check_all_limits("EURUSD", 1.1000, 1.0980, 1.1040, "fixed_tp", None, "buy")
         assert not any("trop petite" in r for r in status.blocking_reasons)
+        assert not any("risque effectif" in r.lower() for r in status.blocking_reasons)
         size = rm.calculate_position_size("EURUSD", 1.1000, 1.0980)
-        assert size == pytest.approx(0.01)
+        # Sized to the 0.5% budget (0.25 EUR on a 20-pip SL), not clamped down
+        # to the 0.01 minimum: the account can now afford its own risk limit.
+        assert size > 0.01
 
-    def test_xauusd_blocked_because_min_lot_risks_too_much(self):
+    def test_xauusd_can_trade_at_50_euros(self):
+        """Was permanently blocked before the contract rescaling."""
         rm = self._manager(50.0)
         status = rm.check_all_limits("XAUUSD", 2650.0, 2640.0, 2670.0, "fixed_tp", None, "buy")
+        assert not any("risque effectif" in r.lower() for r in status.blocking_reasons)
+
+    def test_gate_still_blocks_a_genuinely_oversized_position(self):
+        """The effective-risk cap must remain armed, not merely loosened.
+
+        After the contract rescaling this gate fires much later: a 0.01 minimum
+        lot on a 50 EUR account only exceeds 5 % once the stop is wider than
+        ~2 160 pips, so it is now a guard against pathological levels rather
+        than the primary protection. The primary protection is that
+        calculate_position_size now spends the risk budget instead of
+        inflating it.
+        """
+        rm = self._manager(50.0)
+        # 2 500-pip stop: 0.01 lot risks 2.89 EUR = 5.8 % of a 50 EUR account.
+        status = rm.check_all_limits("EURUSD", 1.1000, 0.8500, 1.6000, "fixed_tp", None, "buy")
+        assert status.can_trade is False
         assert any("risque effectif" in r.lower() for r in status.blocking_reasons)
+
+    def test_a_realistic_wide_stop_is_accepted(self):
+        """Documents where the guard now sits, so its position is not a surprise."""
+        rm = self._manager(50.0)
+        # 600 pips on the minimum lot risks 0.69 EUR = 1.4 % of the account.
+        status = rm.check_all_limits("EURUSD", 1.1000, 1.0400, 1.2200, "fixed_tp", None, "buy")
+        assert not any("risque effectif" in r.lower() for r in status.blocking_reasons)
+
 
     def test_large_account_accepts_theoretical_size(self):
         rm = self._manager(50_000.0)

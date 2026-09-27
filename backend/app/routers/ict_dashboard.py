@@ -201,7 +201,11 @@ async def get_risk_metrics() -> RiskMetrics:
         raise HTTPException(status_code=503, detail="Risk Manager not initialized")
 
     cfg = get_instrument_config("EURUSD")
-    next_trade_risk = rm.current_equity * (cfg.risk_per_trade_pct / 100)
+    # risk_per_trade_pct is a FRACTION (0.005 = 0.5 %), not a percentage. This
+    # used to divide by 100 as well, so next_trade_risk read 0.0025 EUR on a
+    # 50 EUR account instead of 0.25 EUR, and next_trade_risk_pct reported the
+    # raw fraction (0.005) in a field rendered as a percentage.
+    next_trade_risk = rm.current_equity * cfg.risk_per_trade_pct
 
     daily_loss = rm._daily_pnl
     daily_loss_pct = (daily_loss / rm._session_start_equity) * 100 if rm._session_start_equity > 0 else 0.0
@@ -221,7 +225,7 @@ async def get_risk_metrics() -> RiskMetrics:
 
     return RiskMetrics(
         next_trade_risk=next_trade_risk,
-        next_trade_risk_pct=cfg.risk_per_trade_pct,
+        next_trade_risk_pct=cfg.risk_per_trade_pct * 100,
         daily_loss=daily_loss,
         daily_loss_pct=daily_loss_pct,
         drawdown=drawdown,

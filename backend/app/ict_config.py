@@ -344,6 +344,102 @@ def get_contract_size(symbol: Instrument) -> float:
     return INSTRUMENT_CONFIGS[symbol].contract_size
 
 
+# ============================================================
+# MICRO-CONTRACTS (compte démo à petit capital)
+# ============================================================
+
+# Minimum lot the broker accepts, and the price used to size a synthetic
+# contract against. Reference prices only decide the contract magnitude; the
+# actual fill price always comes from the feed.
+MIN_LOT = 0.01
+_REFERENCE_PRICES: dict[Instrument, float] = {
+    "EURUSD": 1.08,
+    "GBPUSD": 1.27,
+    "XAUUSD": 2650.0,
+}
+
+# Notional that one minimum lot should represent, as a fraction of the ICT
+# capital. At 0.25 a 50 EUR account gets a 12.50 EUR minimum lot, which sits
+# between the OMS floor (ORDER_MIN_NOTIONAL 10) and its ceiling
+# (MAX_ORDER_NOTIONAL 18), so the limits finally describe the same thing the
+# risk manager does.
+_MIN_LOT_NOTIONAL_PCT = 0.25
+
+MICRO_CONTRACT_ACTIVE = False
+_CONTRACT_SCALE: dict[Instrument, float] = {}
+
+
+def _apply_micro_contracts() -> None:
+    """Rescale contract sizes so the broker minimum lot is affordable.
+
+    Why this exists
+    ---------------
+    At the standard sizes (1 lot = 100 000 units, 1 lot gold = 100 oz) the
+    minimum 0.01 lot is 1 085 EUR on EURUSD and 2 650 EUR on XAUUSD, against
+    an account of 50 EUR. Every order was then rejected twice over: the risk
+    manager refused it because the effective risk of 0.01 lot (10 % to 40 % of
+    equity) broke its 5 % cap, and the OMS refused the notional.
+
+    A standard contract cannot be risk-managed on 50 EUR. So the paper account
+    uses synthetic contracts sized so that 0.01 lot is a fraction of capital.
+
+    Commissions and per-lot fees are rescaled by the SAME factor. Leaving them
+    at their 100k-lot calibration would make a 7.00 EUR round-trip fee dwarf a
+    position whose whole notional is 12.50 EUR, and every trade would show a
+    loss regardless of direction.
+
+    This is a paper-account convention and is refused outside paper mode: a
+    live broker would fill 0.01 lot at the real 100 000 size, and a synthetic
+    contract would silently over-size the position by 100x.
+    """
+    global MICRO_CONTRACT_ACTIVE
+    if aegis_config.MODE != "paper":
+        MICRO_CONTRACT_ACTIVE = False
+        return
+    if not getattr(aegis_config, "ICT_MICRO_CONTRACTS", True):
+        MICRO_CONTRACT_ACTIVE = False
+        return
+
+    capital = aegis_config.ICT_PAPER_CAPITAL
+    if capital <= 0:
+        return
+
+    target_notional = capital * _MIN_LOT_NOTIONAL_PCT
+    for symbol, cfg in INSTRUMENT_CONFIGS.items():
+        target_contract = target_notional / (MIN_LOT * _REFERENCE_PRICES[symbol])
+        scale = target_contract / cfg.contract_size
+        if scale >= 1:
+            # Account is large enough for the real contract; leave it alone.
+            continue
+        cfg.contract_size = target_contract
+        if cfg.commission_per_lot is not None:
+            cfg.commission_per_lot = cfg.commission_per_lot * scale
+        if cfg.backtest_commission_per_lot is not None:
+            cfg.backtest_commission_per_lot = cfg.backtest_commission_per_lot * scale
+        _CONTRACT_SCALE[symbol] = scale
+
+    MICRO_CONTRACT_ACTIVE = bool(_CONTRACT_SCALE)
+
+
+# Applied at import so every consumer (risk manager, position manager, P&L,
+# backtester) sees the same contract size. Without a single point of
+# application, the risk manager would size on one contract while the OMS
+# validated another.
+_apply_micro_contracts()
+
+
+def lots_to_units(symbol: Instrument, lots: float) -> float:
+    """Convert lots to the unit count the OMS and the order book expect.
+
+    The OMS computes notional as ``quantity * price`` and P&L as
+    ``(exit - entry) * quantity``, so it needs units. The ICT risk manager
+    works in lots, which is the correct unit for sizing. Passing lots straight
+    through understated the notional by contract_size -- 0.0109 instead of
+    1 085 -- which is what made every Forex order look below the OMS minimum.
+    """
+    return lots * get_contract_size(symbol)
+
+
 def pips_to_price(symbol: Instrument, pips: float) -> float:
     """Convertit des pips en prix pour l'instrument."""
     return pips * INSTRUMENT_CONFIGS[symbol].pip_value

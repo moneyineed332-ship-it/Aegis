@@ -84,11 +84,18 @@ def _save_state() -> None:
 # ICT/SMC Pipeline Initialization
 # ============================================================
 
-def _init_ict_pipeline() -> None:
-    """Initialize the ICT/SMC pipeline modules (lazy, on first use)."""
+def _init_ict_pipeline() -> bool:
+    """Initialize the ICT/SMC pipeline modules.
+
+    Returns True when the risk and position managers are live and the restored
+    state is in place. Callers MUST check this: the execution path used to
+    treat a missing risk manager as "skip the risk gate" instead of "refuse the
+    trade", so a failed init meant orders placed with no risk validation and no
+    journal entry.
+    """
     global _ict_signal_generator, _ict_risk_manager, _ict_position_manager, _ict_state_restored
     if not config.ICT_MODE:
-        return
+        return True  # nothing to initialize, not a failure
     try:
         from .ict_signal_generator import ICTSignalGenerator
         from .ict_risk_manager import IctRiskManager
@@ -102,7 +109,6 @@ def _init_ict_pipeline() -> None:
             logger.info("ICT Position Manager initialized")
         # Restore persisted ICT state once (not every cycle, or DB
         # snapshots would clobber hot in-memory mutations).
-        global _ict_state_restored
         if not _ict_state_restored:
             try:
                 _ict_risk_manager.load_state()
@@ -110,8 +116,11 @@ def _init_ict_pipeline() -> None:
                 _ict_state_restored = True
             except Exception as exc:
                 logger.warning("Failed to restore ICT state: %s", exc)
+        return True
     except Exception as exc:
         logger.error("Failed to initialize ICT pipeline: %s", exc)
+        return False
+
 
 
 def _get_ict_signal(instrument: Instrument, current_price: float):
@@ -639,28 +648,48 @@ async def _execute_ict_trade(symbol: str, recommendation: dict, price: float) ->
         })
         return
 
+    # Fail CLOSED. This used to be `if _ict_risk_manager:`, so a missing risk
+    # manager silently skipped the risk gate and placed the order anyway, then
+    # skipped the journal entries too. A trade with no risk validation and no
+    # record in the risk manager is worse than no trade: it is invisible to the
+    # drawdown and daily-loss limits.
+    if _ict_risk_manager is None or _ict_position_manager is None:
+        storage.log_engine_event(_get_cycle_id(), "ict_trade_refused_no_risk_manager", {
+            "instrument": instrument,
+            "direction": direction,
+            "risk_manager": _ict_risk_manager is not None,
+            "position_manager": _ict_position_manager is not None,
+        }, "error")
+        logger.error(
+            "Refusing ICT trade on %s: risk manager or position manager missing",
+            instrument,
+        )
+        return
+
     # Final risk check (should already pass, but defensive).
     # Reuses the signal-time ATR so the §18 volatility gate stays armed.
-    if _ict_risk_manager:
-        risk_status = _ict_risk_manager.check_all_limits(
-            instrument=instrument,
-            entry_price=entry_price,
-            sl_price=sl_price,
-            tp_price=tp_price,
-            direction=direction,
-            current_atr_pips=recommendation.get("current_atr_pips"),
-        )
-        if not risk_status.can_trade:
-            storage.log_engine_event(_get_cycle_id(), "ict_trade_refused_at_exec", {
-                "instrument": instrument, "reasons": risk_status.blocking_reasons,
-            }, "warning")
-            return
+    risk_status = _ict_risk_manager.check_all_limits(
+        instrument=instrument,
+        entry_price=entry_price,
+        sl_price=sl_price,
+        tp_price=tp_price,
+        direction=direction,
+        current_atr_pips=recommendation.get("current_atr_pips"),
+    )
+    if not risk_status.can_trade:
+        storage.log_engine_event(_get_cycle_id(), "ict_trade_refused_at_exec", {
+            "instrument": instrument, "reasons": risk_status.blocking_reasons,
+        }, "warning")
+        return
 
-    # Execute via OMS (paper mode)
+    # Execute via OMS (paper mode). The OMS works in units: notional is
+    # quantity x price, so the lot count must be converted or the position
+    # would be under-sized by contract_size.
+    from .ict_config import lots_to_units
     result = oms.oms.submit_market_order(
         symbol=instrument,
         side=direction,
-        quantity=position_size,
+        quantity=lots_to_units(instrument, position_size),
         current_price=entry_price,
         strategy="ict_smc",
         reason=recommendation.get("reason", ""),
@@ -670,38 +699,36 @@ async def _execute_ict_trade(symbol: str, recommendation: dict, price: float) ->
         fill_price = result.get("fill_price", entry_price)
 
         # Register with ICT risk manager
-        if _ict_risk_manager:
-            risk_amount = _ict_risk_manager.current_equity * get_instrument_config(instrument).risk_per_trade_pct
-            _ict_risk_manager.register_trade_entry(
-                trade_id=result.get("order_id", ""),
-                instrument=instrument,
-                direction=direction,
-                entry_price=fill_price,
-                sl_price=sl_price,
-                tp_price=tp_price,
-                position_size=position_size,
-                risk_amount=risk_amount,
-                risk_pct=get_instrument_config(instrument).risk_per_trade_pct,
-                rr_ratio=recommendation.get("rr_ratio", 0),
-                session=recommendation.get("session", ""),
-                setup_type=recommendation.get("setup_type", "ICT_SMC"),
-            )
+        risk_amount = _ict_risk_manager.current_equity * get_instrument_config(instrument).risk_per_trade_pct
+        _ict_risk_manager.register_trade_entry(
+            trade_id=result.get("order_id", ""),
+            instrument=instrument,
+            direction=direction,
+            entry_price=fill_price,
+            sl_price=sl_price,
+            tp_price=tp_price,
+            position_size=position_size,
+            risk_amount=risk_amount,
+            risk_pct=get_instrument_config(instrument).risk_per_trade_pct,
+            rr_ratio=recommendation.get("rr_ratio", 0),
+            session=recommendation.get("session", ""),
+            setup_type=recommendation.get("setup_type", "ICT_SMC"),
+        )
 
         # Register with Position Manager for post-trade management (§10)
         # Modes: fixed_tp (A), partial (B), breakeven (C), trailing_structural (D)
-        if _ict_position_manager:
-            _ict_position_manager.open_position(
-                instrument=instrument,
-                direction=direction,
-                entry_price=fill_price,
-                sl_price=sl_price,
-                tp_price=tp_price,
-                account_balance=_ict_risk_manager.current_equity if _ict_risk_manager else config.ICT_PAPER_CAPITAL,
-                setup_type=recommendation.get("setup_type", "ICT_SMC"),
-                timeframe="M15",
-                session=recommendation.get("session", ""),
-                trade_id=result.get("order_id", ""),
-            )
+        _ict_position_manager.open_position(
+            instrument=instrument,
+            direction=direction,
+            entry_price=fill_price,
+            sl_price=sl_price,
+            tp_price=tp_price,
+            account_balance=_ict_risk_manager.current_equity,
+            setup_type=recommendation.get("setup_type", "ICT_SMC"),
+            timeframe="M15",
+            session=recommendation.get("session", ""),
+            trade_id=result.get("order_id", ""),
+        )
 
         # Record in journal
         storage.save_decision(instrument, "M15", {
@@ -1099,11 +1126,16 @@ async def task_monitor_positions():
                         close_qty = update.close_size or pos.position_size_lots
                         if close_qty <= 0:
                             close_qty = pos.position_size_lots
-                        # Close position via OMS
+                        # Close position via OMS. The position manager sizes in
+                        # lots and the OMS books in units, so the close must be
+                        # converted the same way the open was, otherwise it
+                        # would sell a fraction of what was bought and leave the
+                        # remainder orphaned on the book.
+                        from .ict_config import lots_to_units
                         close_result = oms.oms.submit_market_order(
                             symbol=pos.instrument,
                             side="sell" if pos.direction == "buy" else "buy",
-                            quantity=close_qty,
+                            quantity=lots_to_units(pos.instrument, close_qty),
                             current_price=price,
                             strategy="ict_position_manager",
                             reason=update.message,
@@ -1279,6 +1311,16 @@ async def start_engine() -> dict:
     """Start the autonomous trading engine."""
     register_tasks()
     _restore_state()
+    # The ICT managers must exist BEFORE any scheduled task can run. They used
+    # to be created lazily inside task_generate_signals, which left a window
+    # where task_execute_trades could submit an order with no risk manager in
+    # place, and returned 503 from the ICT dashboard until the first analysis
+    # cycle had completed.
+    if not _init_ict_pipeline():
+        raise RuntimeError(
+            "ICT pipeline failed to initialize; refusing to start the engine "
+            "because orders would be placed with no risk manager"
+        )
     await scheduler.start()
     storage.set_engine_state("status", "running")
     storage.set_engine_state("started_at", _now_iso())
