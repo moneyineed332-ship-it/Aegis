@@ -84,11 +84,37 @@ def _fetch_yahoo_chart(yahoo_symbol: str, yahoo_interval: str) -> dict | None:
 
 
 def _fetch_ohlcv_yahoo(symbol: str, interval: str, limit: int) -> list[dict]:
-    """Forex OHLCV via Yahoo Finance (MT5 unavailable)."""
+    """Forex OHLCV via Yahoo Finance.
+
+    Never raises. This is the last-resort source for every host without
+    MetaTrader5, so a network error here must degrade to an empty list instead
+    of propagating into the engine's scheduled task and being logged as a
+    cycle failure.
+    """
     yahoo_symbol = _YAHOO_SYMBOLS.get(symbol)
     yahoo_interval = _YAHOO_INTERVALS.get(interval)
     if not yahoo_symbol or not yahoo_interval:
+        logger.warning("No Yahoo mapping for %s %s", symbol, interval)
         return []
+    try:
+        return _fetch_ohlcv_yahoo_inner(symbol, interval, yahoo_symbol, yahoo_interval, limit)
+    except Exception as e:
+        logger.warning("Yahoo Finance fetch failed for %s %s: %s", symbol, interval, e)
+        return []
+
+
+def _fetch_ohlcv_yahoo_inner(
+    symbol: str,
+    interval: str,
+    yahoo_symbol: str,
+    yahoo_interval: str,
+    limit: int,
+) -> list[dict]:
+    """Build candles from a Yahoo chart payload.
+
+    ``interval`` is the AEGIS interval (drives the 4h resampling and the output
+    rows); ``yahoo_interval`` is what Yahoo expects.
+    """
     result = _fetch_yahoo_chart(yahoo_symbol, yahoo_interval)
     if not result:
         return []
@@ -316,27 +342,51 @@ def fetch_ohlcv(symbol: str, interval: str, limit: int, end_time: int | None = N
         return _fetch_ohlcv_fallback(symbol, interval, limit, end_time)
 
 
-def _fetch_ohlcv_mt5(symbol: str, interval: str, limit: int, end_time: int | None = None) -> list[dict]:
-    """Fetch OHLCV candles via MT5 for Forex symbols (Yahoo fallback on Linux)."""
-    mt5_conn = _get_mt5_connector()
+def _mt5_is_usable(mt5_conn) -> bool:
+    """True when the connector exists AND the terminal is actually connected.
+
+    ``_get_mt5_connector()`` returns a live object even when the MetaTrader5
+    package is missing, so a plain ``is not None`` check never detected the
+    Fly.io / Docker case. ``is_connected()`` is the real signal.
+    """
     if mt5_conn is None:
+        return False
+    probe = getattr(mt5_conn, "is_connected", None)
+    if probe is None:
+        # No probe available: optimistically try, and let the empty-result
+        # check below route us to the fallback if it yields nothing.
+        return True
+    try:
+        return bool(probe())
+    except Exception:
+        logger.debug("MT5 is_connected() probe failed", exc_info=True)
+        return True
+
+
+def _fetch_ohlcv_mt5(symbol: str, interval: str, limit: int, end_time: int | None = None) -> list[dict]:
+    """Fetch OHLCV candles for a Forex symbol.
+
+    Source order: MetaTrader5, then Yahoo Finance.
+
+    An empty MT5 result is treated as a FAILURE, not as "no data". The
+    connector swallows its own connection error and returns ``[]``, so the
+    previous ``if not candles: return []`` short-circuited above both
+    fallbacks and left the Forex feed permanently empty on any host without
+    MetaTrader5 — which is every container deployment.
+    """
+    mt5_conn = _get_mt5_connector()
+    if not _mt5_is_usable(mt5_conn):
         logger.info("MT5 unavailable, using Yahoo Finance fallback for %s %s", symbol, interval)
         return _fetch_ohlcv_yahoo(symbol, interval, limit)
-    
+
     try:
-        # Convert end_time to datetime if provided
-        end_date = None
-        if end_time is not None:
-            end_date = datetime.fromtimestamp(end_time / 1000, tz=timezone.utc)
-        
-        # Fetch from MT5
+        end_date = datetime.fromtimestamp(end_time / 1000, tz=timezone.utc) if end_time is not None else None
         candles = mt5_conn.fetch_ohlcv(symbol, interval, limit, None, end_date)
-        
+
         if not candles:
-            logger.warning(f"No MT5 data for {symbol} {interval}")
-            return []
-        
-        # Convert to standard format
+            logger.info("MT5 returned no candles for %s %s, using Yahoo Finance fallback", symbol, interval)
+            return _fetch_ohlcv_yahoo(symbol, interval, limit)
+
         interval_ms = _interval_to_ms(interval)
         return [
             {
@@ -354,7 +404,7 @@ def _fetch_ohlcv_mt5(symbol: str, interval: str, limit: int, end_time: int | Non
             for c in candles
         ]
     except Exception as e:
-        logger.error("MT5 fetch_ohlcv failed for %s: %s", symbol, e, exc_info=True)
+        logger.warning("MT5 fetch_ohlcv failed for %s %s: %s — using Yahoo Finance fallback", symbol, interval, e)
         return _fetch_ohlcv_yahoo(symbol, interval, limit)
 
 
