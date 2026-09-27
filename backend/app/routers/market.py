@@ -19,9 +19,16 @@ def health() -> dict:
     return {"status": "ok", "mode": config.MODE}
 
 
-@router.get("/health/detailed")
+@router.get("/health/detailed", dependencies=[Depends(require_admin_token)])
 def health_detailed() -> dict:
-    """Deep health check: DB, disk, engine status."""
+    """Deep health check: DB, disk, engine status.
+
+    Requires the admin token. It reports free disk space, database size, the
+    engine cycle count and the number of open positions, which is enough to
+    fingerprint a running account and to time an attack for when the market is
+    open. The unauthenticated liveness probe is /health, which the orchestrator
+    uses and which returns nothing but the mode.
+    """
     checks = {}
 
     # Database check
@@ -82,9 +89,13 @@ def health_detailed() -> dict:
     }
 
 
-@router.get("/metrics")
+@router.get("/metrics", dependencies=[Depends(require_admin_token)])
 def prometheus_metrics() -> Response:
-    """Prometheus text exposition format metrics endpoint."""
+    """Prometheus text exposition format metrics endpoint.
+
+    Protected: it exports internal trading counters and per-path cardinality.
+    /health stays public for the orchestrator's probe.
+    """
     return Response(content=metrics.serialize(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 

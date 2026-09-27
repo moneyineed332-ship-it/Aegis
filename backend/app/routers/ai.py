@@ -10,7 +10,7 @@ from ..deps import require_admin_token
 router = APIRouter(prefix="/api/v1/ai", tags=["ai"])
 
 
-@router.get("/status")
+@router.get("/status", dependencies=[Depends(require_admin_token)])
 def get_ai_status() -> dict:
     return ai_analyst.get_status()
 

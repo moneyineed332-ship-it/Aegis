@@ -7,7 +7,16 @@ from typing import Literal
 from .. import config, consensus, execution, market_data, risk, storage
 from ..deps import require_admin_token
 
-router = APIRouter(prefix="/api/v1", tags=["risk"])
+# Every route in this router is risk or account state (exposure, VaR, circuit
+# breaker, trailing stops, consensus), so the dependency is declared once here
+# rather than repeated per route. A new endpoint added to this router is
+# protected by default; TestRouteAuthInventory asserts the same from the
+# outside, so removing it fails a test.
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["risk"],
+    dependencies=[Depends(require_admin_token)],
+)
 
 
 class TrailingStopRequest(BaseModel):

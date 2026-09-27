@@ -17,8 +17,8 @@ client = TestClient(app)
 
 # === Health ===
 
-def test_health():
-    r = client.get("/api/v1/health")
+def test_health(admin_headers):
+    r = client.get("/api/v1/health", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "status" in data
@@ -26,8 +26,8 @@ def test_health():
 
 # === Dashboard ===
 
-def test_dashboard():
-    r = client.get("/api/v1/dashboard")
+def test_dashboard(admin_headers):
+    r = client.get("/api/v1/dashboard", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert data["mode"] == "paper"
@@ -126,8 +126,8 @@ def test_non_ascii_token_returns_401_not_500():
 
 # === Market Snapshots ===
 
-def test_market_snapshots():
-    r = client.get("/api/v1/market-snapshots")
+def test_market_snapshots(admin_headers):
+    r = client.get("/api/v1/market-snapshots", headers=admin_headers)
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
@@ -141,8 +141,8 @@ def test_refresh_market_snapshots(admin_headers):
 
 # === OHLCV ===
 
-def test_ohlcv():
-    r = client.get("/api/v1/ohlcv")
+def test_ohlcv(admin_headers):
+    r = client.get("/api/v1/ohlcv", headers=admin_headers)
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
@@ -156,8 +156,8 @@ def test_refresh_ohlcv(admin_headers):
 
 # === Data Quality ===
 
-def test_data_quality():
-    r = client.get("/api/v1/data-quality/ohlcv")
+def test_data_quality(admin_headers):
+    r = client.get("/api/v1/data-quality/ohlcv", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "valid" in data
@@ -166,23 +166,23 @@ def test_data_quality():
 
 # === Risk ===
 
-def test_risk_summary():
-    r = client.get("/api/v1/risk/summary")
+def test_risk_summary(admin_headers):
+    r = client.get("/api/v1/risk/summary", headers=admin_headers)
     assert r.status_code in (200, 422)
 
 
-def test_risk_stress_test():
-    r = client.get("/api/v1/risk/stress-test")
+def test_risk_stress_test(admin_headers):
+    r = client.get("/api/v1/risk/stress-test", headers=admin_headers)
     assert r.status_code in (200, 404, 422)
 
 
-def test_risk_correlation():
-    r = client.get("/api/v1/risk/correlation")
+def test_risk_correlation(admin_headers):
+    r = client.get("/api/v1/risk/correlation", headers=admin_headers)
     assert r.status_code in (200, 404, 422)
 
 
-def test_risk_concentration():
-    r = client.get("/api/v1/risk/concentration")
+def test_risk_concentration(admin_headers):
+    r = client.get("/api/v1/risk/concentration", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "total_exposure" in data
@@ -190,8 +190,8 @@ def test_risk_concentration():
 
 # === Market Analysis ===
 
-def test_market_analysis():
-    r = client.get("/api/v1/market-analysis")
+def test_market_analysis(admin_headers):
+    r = client.get("/api/v1/market-analysis", headers=admin_headers)
     assert r.status_code in (200, 422)
 
 
@@ -202,16 +202,16 @@ def test_recommendation(admin_headers):
     assert r.status_code in (201, 422)
 
 
-def test_decisions_list():
-    r = client.get("/api/v1/decisions")
+def test_decisions_list(admin_headers):
+    r = client.get("/api/v1/decisions", headers=admin_headers)
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
 
 # === Strategies ===
 
-def test_strategies():
-    r = client.get("/api/v1/strategies")
+def test_strategies(admin_headers):
+    r = client.get("/api/v1/strategies", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert isinstance(data, list)
@@ -220,8 +220,8 @@ def test_strategies():
 
 # === Coach ===
 
-def test_coach_review():
-    r = client.get("/api/v1/coach/review")
+def test_coach_review(admin_headers):
+    r = client.get("/api/v1/coach/review", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "reviewed_backtests" in data
@@ -230,16 +230,16 @@ def test_coach_review():
 
 # === Lab ===
 
-def test_lab_promotions():
-    r = client.get("/api/v1/lab/promotions")
+def test_lab_promotions(admin_headers):
+    r = client.get("/api/v1/lab/promotions", headers=admin_headers)
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
 
 # === Supervisor ===
 
-def test_supervisor_status():
-    r = client.get("/api/v1/supervisor")
+def test_supervisor_status(admin_headers):
+    r = client.get("/api/v1/supervisor", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "status" in data
@@ -248,8 +248,8 @@ def test_supervisor_status():
 
 # === Fear & Greed ===
 
-def test_fear_greed():
-    r = client.get("/api/v1/fear-greed")
+def test_fear_greed(admin_headers):
+    r = client.get("/api/v1/fear-greed", headers=admin_headers)
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
@@ -261,8 +261,8 @@ def test_refresh_fear_greed(admin_headers):
 
 # === Funding Rates ===
 
-def test_funding_rates():
-    r = client.get("/api/v1/funding-rates")
+def test_funding_rates(admin_headers):
+    r = client.get("/api/v1/funding-rates", headers=admin_headers)
     assert r.status_code == 200
 
 
@@ -273,8 +273,8 @@ def test_refresh_funding_rates(admin_headers):
 
 # === Open Interest ===
 
-def test_open_interest():
-    r = client.get("/api/v1/open-interest")
+def test_open_interest(admin_headers):
+    r = client.get("/api/v1/open-interest", headers=admin_headers)
     assert r.status_code == 200
 
 
@@ -285,8 +285,8 @@ def test_refresh_open_interest(admin_headers):
 
 # === Memory ===
 
-def test_memory_list():
-    r = client.get("/api/v1/memory")
+def test_memory_list(admin_headers):
+    r = client.get("/api/v1/memory", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "summary" in data
@@ -298,23 +298,23 @@ def test_memory_remember(admin_headers):
     assert r.status_code in (201, 422)
 
 
-def test_memory_compare():
-    r = client.get("/api/v1/memory/compare")
+def test_memory_compare(admin_headers):
+    r = client.get("/api/v1/memory/compare", headers=admin_headers)
     assert r.status_code in (200, 422)
 
 
 # === Journal ===
 
-def test_journal_analysis():
-    r = client.get("/api/v1/journal/analysis")
+def test_journal_analysis(admin_headers):
+    r = client.get("/api/v1/journal/analysis", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "total_decisions" in data
     assert "feedback" in data
 
 
-def test_journal_outcomes():
-    r = client.get("/api/v1/journal/outcomes")
+def test_journal_outcomes(admin_headers):
+    r = client.get("/api/v1/journal/outcomes", headers=admin_headers)
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
@@ -407,32 +407,36 @@ def test_market_order(admin_headers):
         "symbol": "BTCUSDT",
         "side": "buy",
         "quantity": 0.001,
-    })
+    }, headers=admin_headers)
     assert r.status_code in (201, 401, 422, 423)
 
 
-def test_limit_order():
+def test_limit_order(admin_headers):
+    # Was: quantity 0.0001 at 50000 = 5 EUR, below ORDER_MIN_NOTIONAL (10), and
+    # the assertion accepted 401, so the unauthenticated rejection satisfied it
+    # and the endpoint was never exercised. Now a valid size, and the assertion
+    # is exact.
     r = client.post("/api/v1/execution/limit-order", params={
         "symbol": "BTCUSDT",
         "side": "buy",
-        "quantity": 0.0001,
+        "quantity": 0.0002,
         "limit_price": 50000,
-    })
-    assert r.status_code in (201, 401)
+    }, headers=admin_headers)
+    assert r.status_code == 201
 
 
-def test_fractioned_order():
+def test_fractioned_order(admin_headers):
     r = client.post("/api/v1/execution/fractioned-order", params={
         "symbol": "BTCUSDT",
         "side": "buy",
         "quantity": 0.0002,
         "chunks": 3,
-    })
+    }, headers=admin_headers)
     assert r.status_code in (201, 401, 422, 423)
 
 
-def test_estimate_slippage():
-    r = client.post("/api/v1/execution/estimate-slippage", params={"order_value": 100})
+def test_estimate_slippage(admin_headers):
+    r = client.post("/api/v1/execution/estimate-slippage", params={"order_value": 100}, headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "estimated_slippage_bps" in data
@@ -467,14 +471,14 @@ def test_compare_strategies(admin_headers):
 
 # === Phase 4: WebSocket Alerts ===
 
-def test_alert_history():
-    r = client.get("/api/v1/alerts/history")
+def test_alert_history(admin_headers):
+    r = client.get("/api/v1/alerts/history", headers=admin_headers)
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
 
-def test_alert_thresholds():
-    r = client.get("/api/v1/alerts/thresholds")
+def test_alert_thresholds(admin_headers):
+    r = client.get("/api/v1/alerts/thresholds", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "max_drawdown_pct" in data
@@ -504,69 +508,70 @@ def test_sensitivity(admin_headers):
 
 # === Phase 4: ML Regime ===
 
-def test_ml_regime_summary():
-    r = client.get("/api/v1/ml/regime/summary")
+def test_ml_regime_summary(admin_headers):
+    r = client.get("/api/v1/ml/regime/summary", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "trained" in data
 
 
-def test_ml_regime_predict():
-    r = client.get("/api/v1/ml/regime/predict")
+def test_ml_regime_predict(admin_headers):
+    r = client.get("/api/v1/ml/regime/predict", headers=admin_headers)
     assert r.status_code in (200, 422)
 
 
 # === Phase 4: Binance Testnet ===
 
-def test_binance_testnet_health():
-    r = client.get("/api/v1/binance/testnet/health")
+def test_binance_testnet_health(admin_headers):
+    r = client.get("/api/v1/binance/testnet/health", headers=admin_headers)
     assert r.status_code == 200
 
 
-def test_binance_testnet_status():
-    r = client.get("/api/v1/binance/testnet/status")
+def test_binance_testnet_status(admin_headers):
+    r = client.get("/api/v1/binance/testnet/status", headers=admin_headers)
     assert r.status_code == 200
 
 
-def test_binance_testnet_price():
-    r = client.get("/api/v1/binance/testnet/price?symbol=BTCUSDT")
+def test_binance_testnet_price(admin_headers):
+    r = client.get("/api/v1/binance/testnet/price?symbol=BTCUSDT", headers=admin_headers)
     assert r.status_code == 200
 
 
 # === Phase 4: Multi-Asset ===
 
-def test_asset_classes():
-    r = client.get("/api/v1/assets/classes")
+def test_asset_classes(admin_headers):
+    r = client.get("/api/v1/assets/classes", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "crypto" in data
 
 
-def test_supported_symbols():
-    r = client.get("/api/v1/assets/symbols")
+def test_supported_symbols(admin_headers):
+    r = client.get("/api/v1/assets/symbols", headers=admin_headers)
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
 
-def test_forex_rates():
-    r = client.get("/api/v1/assets/forex")
+def test_forex_rates(admin_headers):
+    r = client.get("/api/v1/assets/forex", headers=admin_headers)
     assert r.status_code in (200, 422)
 
 
-def test_commodity_prices():
-    r = client.get("/api/v1/assets/commodities")
+def test_commodity_prices(admin_headers):
+    r = client.get("/api/v1/assets/commodities", headers=admin_headers)
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
 
 # === Deployment ===
 
-def test_create_pipeline():
-    r = client.post("/api/v1/deployment/pipeline")
-    assert r.status_code in (201, 401)
-    if r.status_code == 201:
-        data = r.json()
-        assert data["current_stage"] == "idea"
+def test_create_pipeline(admin_headers):
+    # Same pattern as the limit-order test: accepting 401 made the permissive
+    # assertion pass without ever reaching the handler.
+    r = client.post("/api/v1/deployment/pipeline", headers=admin_headers)
+    assert r.status_code == 201
+    data = r.json()
+    assert data["current_stage"] == "idea"
 
 
 def test_validate_backtest(admin_headers):
@@ -612,8 +617,8 @@ def test_manual_order_limit_missing_price(client, admin_headers):
     assert r.status_code == 422
 
 
-def test_supervisor_health(client):
-    r = client.get("/api/v1/supervisor")
+def test_supervisor_health(client, admin_headers):
+    r = client.get("/api/v1/supervisor", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert "status" in data
@@ -621,8 +626,8 @@ def test_supervisor_health(client):
     assert "portfolio" in data
 
 
-def test_list_open_orders_empty(client):
-    r = client.get("/api/v1/orders/open")
+def test_list_open_orders_empty(client, admin_headers):
+    r = client.get("/api/v1/orders/open", headers=admin_headers)
     assert r.status_code == 200
     data = r.json()
     assert data["count"] == 0
@@ -655,7 +660,7 @@ def test_cancel_open_order(client, admin_headers):
     r2 = client.post(f"/api/v1/orders/cancel/{order_id}", headers=admin_headers)
     assert r2.status_code == 200
     assert r2.json()["status"] == "cancelled"
-    r3 = client.get("/api/v1/orders/open")
+    r3 = client.get("/api/v1/orders/open", headers=admin_headers)
     assert r3.json()["count"] == 0
 
 
@@ -710,7 +715,7 @@ def test_kill_switch_does_not_persist_a_pending_order(client, admin_headers):
             params={"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002, "limit_price": 50000},
             headers=admin_headers,
         )
-        assert client.get("/api/v1/orders/open").json()["count"] == 0
+        assert client.get("/api/v1/orders/open", headers=admin_headers).json()["count"] == 0
     finally:
         storage.set_kill_switch(False, "regression cleanup")
 
@@ -779,7 +784,7 @@ def test_limit_order_persists_a_pending_order(client, admin_headers):
     )
     assert r.status_code == 201
     assert r.json()["status"] == "pending"
-    assert client.get("/api/v1/orders/open").json()["count"] >= 1
+    assert client.get("/api/v1/orders/open", headers=admin_headers).json()["count"] >= 1
 
 
 def test_limit_order_rejects_non_positive_quantity(client, admin_headers):

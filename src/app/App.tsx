@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, useNavigate, useLocation, Navigate } from "react-router-dom";
-import { activateEmergencyStop, getDashboard, getSupervisor, refreshFearGreed, refreshFundingRates, refreshHistory, refreshMarketData, resumeSupervisor, hasAdminToken, clearAdminToken, type DashboardSnapshot, type SupervisorStatus } from "../lib/api";
+import { activateEmergencyStop, getAdminToken, getDashboard, getSupervisor, refreshFearGreed, refreshFundingRates, refreshHistory, refreshMarketData, resumeSupervisor, hasAdminToken, clearAdminToken, verifyAdminToken, type DashboardSnapshot, type SupervisorStatus } from "../lib/api";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import BackToTop from "./components/BackToTop";
 import AdminLogin from "./components/AdminLogin";
@@ -343,6 +343,25 @@ export default function App() {
   // The admin token lives in localStorage only, so authentication state must be
   // re-read on mount instead of baked into a build-time variable.
   const [authenticated, setAuthenticated] = useState(() => hasAdminToken());
+
+  // A stored token is not proof of a valid one. Every financial read requires it
+  // now, so a token that has been rotated or revoked would leave the operator
+  // looking at a dashboard whose every panel fails, with no way back to the
+  // login screen. Verify once on mount and drop the token if it is rejected.
+  useEffect(() => {
+    if (!hasAdminToken()) return;
+    let cancelled = false;
+    void verifyAdminToken(getAdminToken()).then((valid) => {
+      if (cancelled) return;
+      if (!valid) {
+        clearAdminToken();
+        setAuthenticated(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleAuthChange = useCallback(() => {
     setAuthenticated(hasAdminToken());

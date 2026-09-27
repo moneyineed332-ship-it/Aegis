@@ -10,17 +10,25 @@ Provides API endpoints for the dashboard according to cahier des charges:
 import logging
 from datetime import datetime, timezone
 from typing import Literal, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from ..ict_config import Instrument, get_instrument_config
 from ..ict_risk_manager import IctRiskManager, RiskStatus
+from ..deps import require_admin_token
 from ..position_manager import PositionManager, Position
 from ..trade_journal import TradeJournal
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/ict/dashboard", tags=["ICT Dashboard"])
+# The ICT dashboard exposes capital, PnL, drawdown, open positions and the risk
+# limits: all account state. Protected at the router level so every endpoint is
+# covered, including any added later.
+router = APIRouter(
+    prefix="/api/ict/dashboard",
+    tags=["ICT Dashboard"],
+    dependencies=[Depends(require_admin_token)],
+)
 
 
 # ============================================================

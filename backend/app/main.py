@@ -162,7 +162,7 @@ def _build_journal_data() -> dict:
 
 
 @app.get("/api/v1/dashboard")
-def dashboard() -> dict:
+def dashboard(_admin: None = Depends(require_admin_token)) -> dict:
     """Dashboard with 5-second TTL cache to avoid redundant recomputation."""
     now = time.time()
     
@@ -298,6 +298,7 @@ def create_paper_order(
 def ohlcv_quality(
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     return data_quality.validate_ohlcv(storage.list_ohlcv_candles(symbol, interval, limit=5_000), interval)
 
@@ -306,6 +307,7 @@ def ohlcv_quality(
 def risk_summary(
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=500)
     try:
@@ -317,7 +319,7 @@ def risk_summary(
 
 
 @app.get("/api/v1/journal/analysis")
-def journal_analysis() -> dict:
+def journal_analysis(_admin: None = Depends(require_admin_token)) -> dict:
     decisions = storage.list_recent_decisions(limit=100)
     snapshots = storage.list_market_snapshots(limit=10)
     prices = {s["symbol"]: s["price"] for s in snapshots}
@@ -327,7 +329,7 @@ def journal_analysis() -> dict:
 
 
 @app.get("/api/v1/journal/outcomes")
-def journal_outcomes() -> list[dict]:
+def journal_outcomes(_admin: None = Depends(require_admin_token)) -> list[dict]:
     decisions = storage.list_recent_decisions(limit=50)
     snapshots = storage.list_market_snapshots(limit=10)
     prices = {s["symbol"]: s["price"] for s in snapshots}
@@ -344,6 +346,7 @@ def journal_outcomes() -> list[dict]:
 def market_analysis(
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=100)
     quality = data_quality.validate_ohlcv(candles, interval)
@@ -377,17 +380,17 @@ def recommendation(
 
 
 @app.get("/api/v1/decisions")
-def decisions() -> list[dict]:
+def decisions(_admin: None = Depends(require_admin_token)) -> list[dict]:
     return storage.list_recent_decisions()
 
 
 @app.get("/api/v1/strategies")
-def strategies() -> list[dict]:
+def strategies(_admin: None = Depends(require_admin_token)) -> list[dict]:
     return strategy_registry.list_strategies()
 
 
 @app.get("/api/v1/focus/status")
-def focus_status() -> dict:
+def focus_status(_admin: None = Depends(require_admin_token)) -> dict:
     """Active-mode summary: focused single-strategy or ICT/SMC forex."""
     ict_mode = config.ICT_MODE and not config.FOCUSED_MODE
     symbols = (
@@ -414,7 +417,7 @@ def focus_status() -> dict:
 
 
 @app.get("/api/v1/coach/review")
-def coach_review() -> dict:
+def coach_review(_admin: None = Depends(require_admin_token)) -> dict:
     backtests = storage.list_recent_backtests(limit=100)
     review = coach.review(backtests)
     analysis = coach.propose_improvements(review.get("strategy_analysis", []))
@@ -422,12 +425,12 @@ def coach_review() -> dict:
 
 
 @app.get("/api/v1/lab/promotions")
-def lab_promotions() -> list[dict]:
+def lab_promotions(_admin: None = Depends(require_admin_token)) -> list[dict]:
     return [lab.promotion_decision(backtest) for backtest in storage.list_recent_backtests(limit=100)]
 
 
 @app.get("/api/v1/memory")
-def memory_list(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> dict:
+def memory_list(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT", _admin: None = Depends(require_admin_token)) -> dict:
     episodes = storage.list_memory_episodes(symbol, limit=100)
     return {
         "summary": memory.summarize_episodes(episodes),
@@ -456,6 +459,7 @@ def memory_remember(
 @app.get("/api/v1/memory/compare")
 def memory_compare(
     symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, "1h", limit=100)
     try:
@@ -467,7 +471,7 @@ def memory_compare(
 
 
 @app.get("/api/v1/supervisor")
-def supervisor_status() -> dict:
+def supervisor_status(_admin: None = Depends(require_admin_token)) -> dict:
     return {**supervisor.status(storage.get_kill_switch()), "alerts": storage.list_alerts()}
 
 
@@ -611,7 +615,7 @@ def execute_fractioned_order(
 
 
 @app.post("/api/v1/execution/estimate-slippage")
-def estimate_slippage(order_value: float = 100) -> dict:
+def estimate_slippage(order_value: float = 100, _admin: None = Depends(require_admin_token)) -> dict:
     return {"order_value": order_value, "estimated_slippage_bps": execution.estimate_slippage(order_value)}
 
 
@@ -767,12 +771,12 @@ async def websocket_alerts(websocket: WebSocket):
 
 
 @app.get("/api/v1/alerts/history")
-def get_alert_history(limit: int = 50) -> list[dict]:
+def get_alert_history(limit: int = 50, _admin: None = Depends(require_admin_token)) -> list[dict]:
     return alert_manager.alert_history[-limit:]
 
 
 @app.get("/api/v1/alerts/thresholds")
-def get_alert_thresholds() -> dict:
+def get_alert_thresholds(_admin: None = Depends(require_admin_token)) -> dict:
     return alert_manager.thresholds
 
 
@@ -819,7 +823,7 @@ async def check_alerts(_admin: None = Depends(require_admin_token)) -> dict:
 # === Position Monitoring ===
 
 @app.get("/api/v1/positions/monitor")
-def get_position_monitor() -> dict:
+def get_position_monitor(_admin: None = Depends(require_admin_token)) -> dict:
     """Get real-time position monitoring data with PnL and risk metrics."""
     positions = storage.list_positions()
     snapshots = storage.list_market_snapshots(limit=10)
@@ -828,7 +832,7 @@ def get_position_monitor() -> dict:
 
 
 @app.get("/api/v1/positions/pnl")
-def get_position_pnl() -> dict:
+def get_position_pnl(_admin: None = Depends(require_admin_token)) -> dict:
     """Get PnL summary (unrealized + realized)."""
     positions = storage.list_positions()
     snapshots = storage.list_market_snapshots(limit=10)
@@ -849,7 +853,7 @@ def get_position_pnl() -> dict:
 
 
 @app.get("/api/v1/positions/risks")
-def get_position_risks() -> dict:
+def get_position_risks(_admin: None = Depends(require_admin_token)) -> dict:
     """Check positions against risk thresholds."""
     positions = storage.list_positions()
     snapshots = storage.list_market_snapshots(limit=10)
@@ -868,7 +872,7 @@ def get_position_risks() -> dict:
 
 
 @app.get("/api/v1/portfolio/correlation")
-def get_portfolio_correlation() -> dict:
+def get_portfolio_correlation(_admin: None = Depends(require_admin_token)) -> dict:
     """Multi-asset correlation analysis with dynamic sizing recommendations."""
     from .multi_asset_correlation import compute_portfolio_correlation_risk
     symbols = list(config.FOCUSED_SYMBOLS if config.FOCUSED_MODE else ("BTCUSDT", "ETHUSDT", "SOLUSDT"))
@@ -876,7 +880,7 @@ def get_portfolio_correlation() -> dict:
 
 
 @app.get("/api/v1/portfolio/daily-report")
-def get_daily_report(date: str | None = None) -> dict:
+def get_daily_report(date: str | None = None, _admin: None = Depends(require_admin_token)) -> dict:
     """Generate comprehensive daily report with PnL, trades, regimes, and performance."""
     from .daily_report import generate_daily_report
     return generate_daily_report(date)
@@ -963,7 +967,7 @@ def place_manual_order(req: ManualOrderRequest, _admin: None = Depends(require_a
 
 
 @app.get("/api/v1/orders/open")
-def list_open_orders() -> dict:
+def list_open_orders(_admin: None = Depends(require_admin_token)) -> dict:
     """List all pending open limit orders."""
     orders = storage.list_open_orders()
     return {"count": len(orders), "orders": orders}
@@ -1021,25 +1025,25 @@ async def websocket_positions(websocket: WebSocket):
 # === Learning & Strategy Performance ===
 
 @app.get("/api/v1/learning/strategies")
-def get_strategy_performance() -> list[dict]:
+def get_strategy_performance(_admin: None = Depends(require_admin_token)) -> list[dict]:
     """Get performance stats for all strategies, ranked by score."""
     return learning.get_all_strategy_stats()
 
 
 @app.get("/api/v1/learning/strategies/{strategy_id}")
-def get_strategy_performance_detail(strategy_id: str) -> dict:
+def get_strategy_performance_detail(strategy_id: str, _admin: None = Depends(require_admin_token)) -> dict:
     """Get detailed performance stats for a single strategy."""
     return learning.get_strategy_stats(strategy_id)
 
 
 @app.get("/api/v1/learning/regime/{regime}")
-def get_strategies_for_regime(regime: str) -> list[dict]:
+def get_strategies_for_regime(regime: str, _admin: None = Depends(require_admin_token)) -> list[dict]:
     """Rank strategies by their performance in a given regime."""
     return learning.rank_strategies_for_regime(regime)
 
 
 @app.get("/api/v1/learning/weights/{regime}")
-def get_adaptive_weights(regime: str) -> dict:
+def get_adaptive_weights(regime: str, _admin: None = Depends(require_admin_token)) -> dict:
     """Get adaptive strategy weights for the current regime."""
     return learning.get_advisor_weights(regime)
 
@@ -1049,19 +1053,20 @@ def get_trade_outcomes(
     strategy: str | None = None,
     status: str | None = None,
     limit: int = 50,
+    _admin: None = Depends(require_admin_token),
 ) -> list[dict]:
     """Get trade outcome records with optional filters."""
     return storage.list_trade_outcomes(strategy=strategy, status=status, limit=limit)
 
 
 @app.get("/api/v1/learning/memory/{symbol}")
-def get_memory_consolidation(symbol: str) -> dict:
+def get_memory_consolidation(symbol: str, _admin: None = Depends(require_admin_token)) -> dict:
     """Get consolidated memory patterns for a symbol."""
     return learning.consolidate_memory(symbol)
 
 
 @app.get("/api/v1/learning/summary")
-def get_learning_summary() -> dict:
+def get_learning_summary(_admin: None = Depends(require_admin_token)) -> dict:
     """Get a summary of the learning system state."""
     all_stats = learning.get_all_strategy_stats()
     outcomes = storage.list_trade_outcomes(limit=1000)
@@ -1219,7 +1224,7 @@ def train_ml_regime(request: Request, symbol: str = "BTCUSDT", interval: str = "
 
 
 @app.get("/api/v1/ml/regime/predict")
-def predict_regime(symbol: str = "BTCUSDT", interval: str = "1h") -> dict:
+def predict_regime(symbol: str = "BTCUSDT", interval: str = "1h", _admin: None = Depends(require_admin_token)) -> dict:
     """Predict current regime using trained ML model."""
     candles = storage.list_ohlcv_candles(symbol, interval, limit=200)
     if len(candles) < 50:
@@ -1238,7 +1243,7 @@ def predict_regime(symbol: str = "BTCUSDT", interval: str = "1h") -> dict:
 
 
 @app.get("/api/v1/ml/regime/summary")
-def ml_regime_summary() -> dict:
+def ml_regime_summary(_admin: None = Depends(require_admin_token)) -> dict:
     """Get ML model summary and feature importance."""
     return ml_regime.predictor.summary()
 
@@ -1246,7 +1251,7 @@ def ml_regime_summary() -> dict:
 # === Binance Testnet ===
 
 @app.get("/api/v1/binance/testnet/status")
-def binance_testnet_status() -> dict:
+def binance_testnet_status(_admin: None = Depends(require_admin_token)) -> dict:
     client = binance_testnet.BinanceTestnet()
     return client.test_connection()
 
@@ -1341,7 +1346,7 @@ def get_stock_price(symbol: str) -> dict:
 # === Autonomous Engine Control ===
 
 @app.get("/api/v1/engine/status")
-def engine_status() -> dict:
+def engine_status(_admin: None = Depends(require_admin_token)) -> dict:
     """Get autonomous engine status."""
     return engine.get_engine_status()
 
@@ -1363,19 +1368,19 @@ async def engine_stop(request: Request, _admin: None = Depends(require_admin_tok
 
 
 @app.get("/api/v1/engine/logs")
-def engine_logs(limit: int = 50) -> list[dict]:
+def engine_logs(limit: int = 50, _admin: None = Depends(require_admin_token)) -> list[dict]:
     """Get recent engine log entries."""
     return storage.list_engine_logs(limit)
 
 
 @app.get("/api/v1/engine/stats")
-def engine_stats() -> dict:
+def engine_stats(_admin: None = Depends(require_admin_token)) -> dict:
     """Get engine statistics."""
     return storage.get_engine_stats()
 
 
 @app.get("/api/v1/engine/signals")
-def engine_signals(limit: int = 20) -> list[dict]:
+def engine_signals(limit: int = 20, _admin: None = Depends(require_admin_token)) -> list[dict]:
     """Get recent trade signals."""
     return storage.list_trade_signals(limit)
 
@@ -1393,21 +1398,21 @@ def engine_trigger_task(request: Request, task_name: str, _admin: None = Depends
 # === Order Management System (OMS) ===
 
 @app.get("/api/v1/oms/status")
-def oms_status() -> dict:
+def oms_status(_admin: None = Depends(require_admin_token)) -> dict:
     """Get OMS status."""
     from . import oms as _oms
     return _oms.oms.get_status()
 
 
 @app.get("/api/v1/oms/orders")
-def oms_orders(limit: int = 50) -> list[dict]:
+def oms_orders(limit: int = 50, _admin: None = Depends(require_admin_token)) -> list[dict]:
     """Get recent orders from OMS."""
     from . import oms as _oms
     return _oms.oms.get_order_history(limit)
 
 
 @app.get("/api/v1/oms/open")
-def oms_open_orders() -> list[dict]:
+def oms_open_orders(_admin: None = Depends(require_admin_token)) -> list[dict]:
     """Get open orders from exchange."""
     from . import oms as _oms
     return _oms.oms.get_open_orders()
@@ -1421,7 +1426,7 @@ def oms_reconcile(_admin: None = Depends(require_admin_token)) -> dict:
 
 
 @app.get("/api/v1/oms/mode")
-def oms_mode() -> dict:
+def oms_mode(_admin: None = Depends(require_admin_token)) -> dict:
     """Get current execution mode and limits."""
     from . import execution as _execution
     return _execution.get_execution_mode()
