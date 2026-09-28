@@ -758,14 +758,33 @@ def compare_all_strategies(
 
 from .alerts import manager as alert_manager  # noqa: E402
 
+@app.post("/api/v1/auth/ws-ticket")
+def mint_ws_ticket(_admin: None = Depends(require_admin_token)) -> dict:
+    """Mint a single-use, short-lived ticket for the alerts WebSocket.
+
+    The WebSocket URL is the one place a credential cannot travel in a header,
+    and a URL is what the reverse proxy records. This keeps the long-lived admin
+    token out of that log: the browser authenticates here, then connects with a
+    code that expires in seconds and is consumed on first use.
+    """
+    from .deps import issue_ws_ticket
+
+    return {"ticket": issue_ws_ticket(), "expires_in": 20}
+
+
 @app.websocket("/ws/alerts")
 async def websocket_alerts(websocket: WebSocket):
-    """WebSocket endpoint for real-time alerts. Requires admin token if configured."""
-    token = websocket.query_params.get("token", "")
-    if config.ADMIN_TOKEN:
-        if not token or not hmac.compare_digest(token, config.ADMIN_TOKEN):
-            await websocket.close(code=4001, reason="Unauthorized")
-            return
+    """WebSocket endpoint for real-time alerts.
+
+    Authenticated by single-use ticket, not by the admin token: see
+    /api/v1/auth/ws-ticket for why the admin token is kept out of URLs.
+    """
+    from .deps import consume_ws_ticket
+
+    ticket = websocket.query_params.get("ticket", "")
+    if not consume_ws_ticket(ticket):
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
     await alert_manager.connect(websocket)
     try:
         while True:
@@ -774,6 +793,7 @@ async def websocket_alerts(websocket: WebSocket):
                 await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:
         alert_manager.disconnect(websocket)
+
 
 
 @app.get("/api/v1/alerts/history")
@@ -988,12 +1008,17 @@ def cancel_open_order_endpoint(order_id: str, _admin: None = Depends(require_adm
 
 @app.websocket("/ws/positions")
 async def websocket_positions(websocket: WebSocket):
-    """Stream real-time position data every 5 seconds. Requires admin token if configured."""
-    token = websocket.query_params.get("token", "")
-    if config.ADMIN_TOKEN:
-        if not token or not hmac.compare_digest(token, config.ADMIN_TOKEN):
-            await websocket.close(code=4001, reason="Unauthorized")
-            return
+    """Stream real-time position data every 5 seconds.
+
+    Authenticated by single-use ticket like /ws/alerts: a WebSocket URL is
+    recorded by the reverse proxy, so the long-lived admin token does not belong
+    in it.
+    """
+    from .deps import consume_ws_ticket
+
+    if not consume_ws_ticket(websocket.query_params.get("ticket", "")):
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
     await websocket.accept()
     try:
         while True:

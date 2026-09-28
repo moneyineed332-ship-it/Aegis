@@ -23,10 +23,15 @@ def test_engine_status_has_required_fields():
     assert "symbols" in status
 
 
-def test_engine_cycle_id_increments():
+def test_engine_cycle_id_stable_within_a_cycle():
+    # This used to assert id1 != id2 for two consecutive reads, which is what
+    # made every event its own "cycle" and grouping impossible. The id advances
+    # when a pass of the engine starts, not when something is logged.
     id1 = engine._get_cycle_id()
     id2 = engine._get_cycle_id()
-    assert id1 != id2
+    assert id1 == id2
+    engine._begin_cycle(1)
+    assert engine._get_cycle_id() != id1
 
 
 def test_engine_register_tasks():

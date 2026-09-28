@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from "react";
-import { getAdminToken } from "../../lib/api";
+import { fetchWsTicket, getAdminToken } from "../../lib/api";
 
 interface AlertMessage {
   type: string;
@@ -43,7 +43,7 @@ export function AlertWebSocketProvider({ children }: { children: ReactNode }) {
     mountedRef.current = true;
     const maxRetries = 10;
 
-    const connect = () => {
+    const connect = async () => {
       if (!mountedRef.current || retryCountRef.current >= maxRetries) return;
       try {
         // The configured URL is already validated in api.ts, which throws in
@@ -51,9 +51,27 @@ export function AlertWebSocketProvider({ children }: { children: ReactNode }) {
         // case where the variable is absent entirely, which only affects the
         // socket and not the REST calls.
         const baseUrl = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/^http/, "ws");
-        const token = getAdminToken();
-        const wsUrl = token ? `${baseUrl}/ws/alerts?token=${encodeURIComponent(token)}` : `${baseUrl}/ws/alerts`;
-        const ws = new WebSocket(wsUrl);
+
+        // A one-shot ticket, not the admin token. The WebSocket URL is the one
+        // place a credential cannot travel in a header, and the URL is what the
+        // reverse proxy records; a ticket that expires in seconds and is spent
+        // on first use keeps the long-lived token out of that log.
+        if (!getAdminToken()) {
+          const unauthenticated = new WebSocket(`${baseUrl}/ws/alerts`);
+          wsRef.current = unauthenticated;
+          unauthenticated.onclose = () => {
+            if (mountedRef.current) setConnected(false);
+          };
+          return;
+        }
+
+        const ticket = await fetchWsTicket();
+        if (!ticket) {
+          if (mountedRef.current) setConnected(false);
+          return;
+        }
+        if (!mountedRef.current) return;
+        const ws = new WebSocket(`${baseUrl}/ws/alerts?ticket=${encodeURIComponent(ticket)}`);
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -77,19 +95,21 @@ export function AlertWebSocketProvider({ children }: { children: ReactNode }) {
           retryCountRef.current++;
           const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 30000);
           if (mountedRef.current) {
-            reconnectTimerRef.current = setTimeout(connect, delay);
+            // Each attempt mints its own ticket, since the previous one was
+            // consumed by the connection it was made for.
+            reconnectTimerRef.current = setTimeout(() => void connect(), delay);
           }
         };
 
         ws.onerror = () => ws.close();
       } catch {
         if (mountedRef.current) {
-          reconnectTimerRef.current = setTimeout(connect, 5000);
+          reconnectTimerRef.current = setTimeout(() => void connect(), 5000);
         }
       }
     };
 
-    connect();
+    void connect();
 
     return () => {
       mountedRef.current = false;

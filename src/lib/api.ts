@@ -451,6 +451,24 @@ export async function verifyAdminToken(token: string): Promise<boolean> {
   return response.ok;
 }
 
+export async function fetchWsTicket(): Promise<string | null> {
+  // A one-shot credential for the alerts WebSocket.
+  //
+  // A WebSocket cannot carry an Authorization header, so the credential has to
+  // ride in the URL -- and the URL is what the reverse proxy writes to its access
+  // log. The admin token is long-lived and unlocks every financial endpoint, so
+  // it must never be that value. This trades it for a code that expires in
+  // seconds and is consumed on the first connection attempt, so a log line
+  // reading it is worth nothing.
+  const response = await fetch(`${apiBaseUrl}/api/v1/auth/ws-ticket`, {
+    method: "POST",
+    headers: getAdminHeaders(),
+  });
+  if (!response.ok) return null;
+  const body = (await response.json()) as { ticket?: string };
+  return body.ticket ?? null;
+}
+
 function getAdminHeaders(): Record<string, string> {
   const token = getAdminToken();
   return token ? { "X-AEGIS-Admin-Token": token } : {};
@@ -492,8 +510,9 @@ export async function getJournalAnalysis(): Promise<JournalAnalysis> {
 }
 
 export async function postApi<T>(path: string, body?: unknown): Promise<T> {
-  // Header-only auth: tokens in query strings leak into logs/history.
-  // (WebSocket URLs still use ?token= — browsers can't set WS headers.)
+  // Header-only auth: tokens in query strings leak into proxy logs and browser
+  // history. The WebSockets are the one exception browsers force, and they use
+  // a single-use ticket rather than the admin token (see fetchWsTicket).
   const url = `${apiBaseUrl}${path}`;
   const opts: RequestInit = { method: "POST" };
   if (body !== undefined) {

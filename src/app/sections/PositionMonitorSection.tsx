@@ -7,6 +7,7 @@ import {
   closePosition,
   placeManualOrder,
   getAdminToken,
+  fetchWsTicket,
   type ManualOrderRequest,
   type PortfolioSummary,
   type PositionDetail,
@@ -47,20 +48,29 @@ export default function PositionMonitorSection() {
   // WebSocket for live position updates
   useEffect(() => {
     const baseUrl = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/^http/, "ws");
-    const token = getAdminToken();
-    const wsUrl = token ? `${baseUrl}/ws/positions?token=${encodeURIComponent(token)}` : `${baseUrl}/ws/positions`;
 
     let ws: WebSocket;
     let reconnectTimeout: ReturnType<typeof setTimeout>;
 
-    const connect = () => {
-      ws = new WebSocket(wsUrl);
+    // A one-shot ticket, not the admin token: the socket URL is recorded by the
+    // reverse proxy, and the admin token unlocks every financial endpoint.
+    const connect = async () => {
+      if (!getAdminToken()) {
+        setWsConnected(false);
+        return;
+      }
+      const ticket = await fetchWsTicket();
+      if (!ticket) {
+        setWsConnected(false);
+        return;
+      }
+      ws = new WebSocket(`${baseUrl}/ws/positions?ticket=${encodeURIComponent(ticket)}`);
       wsRef.current = ws;
 
       ws.onopen = () => setWsConnected(true);
       ws.onclose = () => {
         setWsConnected(false);
-        reconnectTimeout = setTimeout(connect, 5000);
+        reconnectTimeout = setTimeout(() => void connect(), 5000);
       };
       ws.onerror = () => ws.close();
       ws.onmessage = (event) => {
@@ -71,10 +81,10 @@ export default function PositionMonitorSection() {
             setLastUpdated(new Date());
           }
         } catch { /* silent */ }
-      };
+      }
     };
 
-    connect();
+    void connect();
     return () => {
       clearTimeout(reconnectTimeout);
       ws?.close();

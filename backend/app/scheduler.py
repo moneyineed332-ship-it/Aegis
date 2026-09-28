@@ -46,6 +46,17 @@ class Scheduler:
         self._running = False
         self._loop_task: asyncio.Task | None = None
         self._run_lock = asyncio.Lock()
+        # Called when a tick dispatches work. The engine uses it to advance the
+        # cycle id, so every event written during that tick shares one id.
+        self.on_dispatch = None
+
+    def _on_dispatch(self, task_count: int) -> None:
+        if self.on_dispatch is not None:
+            try:
+                self.on_dispatch(task_count)
+            except Exception:  # pragma: no cover - a hook must not stop the engine
+                logger.exception("Dispatch hook failed")
+
 
     def register(self, name: str, func: callable, interval: float) -> None:
         """Register a periodic task."""
@@ -99,12 +110,20 @@ class Scheduler:
         """Main scheduler loop."""
         while self._running:
             now = time.monotonic()
+            dispatched: list[ScheduledTask] = []
             for task in self._tasks.values():
                 if not task.enabled:
                     continue
                 if task.running:
                     continue
                 if now - task.last_run >= task.interval:
+                    dispatched.append(task)
+            if dispatched:
+                # One cycle per tick that actually did work. The cycle id is what
+                # groups a pass of the engine in the log, so it has to advance
+                # when work starts, not when something is logged.
+                self._on_dispatch(len(dispatched))
+                for task in dispatched:
                     task.running = True
                     task.last_run = now
                     task.task = asyncio.create_task(self._run_task(task))

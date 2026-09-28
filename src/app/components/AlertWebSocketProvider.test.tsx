@@ -40,7 +40,13 @@ describe("AlertWebSocketProvider", () => {
   beforeEach(() => {
     MockWebSocket.instances = [];
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
-    vi.stubGlobal("localStorage", { getItem: vi.fn(() => null), setItem: vi.fn() });
+    // The operator is logged in: the socket is authenticated with a single-use
+    // ticket, so receiving alerts depends on that path succeeding.
+    vi.stubGlobal("localStorage", { getItem: vi.fn(() => "test-token"), setItem: vi.fn() });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({ ticket: "wst1_test" }) })),
+    );
   });
 
   afterEach(() => {
@@ -114,5 +120,48 @@ describe("AlertWebSocketProvider", () => {
       ws.onmessage?.({ data: "not json" });
     });
     expect(screen.getByTestId("alert").textContent).toBe("none");
+  });
+
+  it("connects with a single-use ticket, never the admin token", async () => {
+    render(
+      <AlertWebSocketProvider>
+        <TestConsumer />
+      </AlertWebSocketProvider>
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    const url = MockWebSocket.instances[0].url;
+    // The reverse proxy records the URL, so the admin token must not be in it.
+    expect(url).toContain("ticket=");
+    expect(url).not.toContain("test-token");
+    expect(url).not.toContain("token=");
+  });
+
+  it("does not subscribe to alerts when the ticket cannot be minted", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+    render(
+      <AlertWebSocketProvider>
+        <TestConsumer />
+      </AlertWebSocketProvider>
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(screen.getByTestId("status").textContent).toBe("disconnected");
+    expect(screen.getByTestId("alert").textContent).toBe("none");
+  });
+
+  it("does not put the admin token in the URL when logged out", async () => {
+    vi.stubGlobal("localStorage", { getItem: vi.fn(() => null), setItem: vi.fn() });
+    render(
+      <AlertWebSocketProvider>
+        <TestConsumer />
+      </AlertWebSocketProvider>
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(MockWebSocket.instances[0].url).not.toContain("token=");
   });
 });

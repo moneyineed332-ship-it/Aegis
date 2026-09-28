@@ -1266,10 +1266,23 @@ async def task_learning():
 # ============================================================
 
 def _get_cycle_id() -> str:
-    """Generate a short cycle ID for log grouping."""
+    """The id of the cycle currently running, for log grouping.
+
+    This used to increment a counter on every call, so every event got its own
+    id: 6 898 logged events produced 1 606 "cycles", and no two events ever shared
+    one. The id exists to group a pass of the engine, so it now advances once per
+    scheduler tick that dispatched work (see Scheduler.on_dispatch) and every
+    event written in that tick reports the same value.
+    """
+    return f"c{_cycle_count}"
+
+
+def _begin_cycle(task_count: int) -> None:
+    """Scheduler hook: a new pass of the engine starts here."""
     global _cycle_count
     _cycle_count += 1
-    return f"c{_cycle_count}"
+    logger.debug("Engine cycle %d started (%d task(s))", _cycle_count, task_count)
+
 
 
 def _restore_state() -> None:
@@ -1467,3 +1480,9 @@ def get_engine_status() -> dict:
             "optimize": config.ENGINE_INTERVAL_OPTIMIZE,
         },
     }
+
+
+# One engine cycle per scheduler tick that dispatched work, so every event written
+# in that pass shares a cycle id. Wired at the end of the module because
+# _begin_cycle has to exist first.
+scheduler.on_dispatch = _begin_cycle
