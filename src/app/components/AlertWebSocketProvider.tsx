@@ -46,6 +46,10 @@ export function AlertWebSocketProvider({ children }: { children: ReactNode }) {
     const connect = () => {
       if (!mountedRef.current || retryCountRef.current >= maxRetries) return;
       try {
+        // The configured URL is already validated in api.ts, which throws in
+        // dev when it points at a remote host. The fallback is kept for the
+        // case where the variable is absent entirely, which only affects the
+        // socket and not the REST calls.
         const baseUrl = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/^http/, "ws");
         const token = getAdminToken();
         const wsUrl = token ? `${baseUrl}/ws/alerts?token=${encodeURIComponent(token)}` : `${baseUrl}/ws/alerts`;

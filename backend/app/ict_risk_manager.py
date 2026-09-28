@@ -20,6 +20,7 @@ from .ict_config import (
 )
 from .session_filter import is_trading_allowed, get_session_status
 from .news_filter import is_news_blocking, get_news_status
+from . import storage
 
 # Optional import to avoid circular dependency
 try:
@@ -245,6 +246,37 @@ class IctRiskManager:
     # VÉRIFICATIONS PRINCIPALES (Cahier des charges §18)
     # --------------------------------------------------------
     
+    def book_open_positions(self, instrument: str | None = None) -> list[dict]:
+        """Positions actually held, read from the order book.
+
+        The order book is the record of what is open. ``_open_trades`` only
+        holds trades this manager opened itself, so counting it made every limit
+        blind to a position it did not create. Measured on a local run: the OMS
+        reported 1 open position at 16.81 EUR while this manager reported 0,
+        so the position consumed the exposure cap without ever being counted by
+        a drawdown or daily-loss limit.
+
+        A row in the positions table is by definition open: closing one deletes
+        it rather than zeroing the quantity.
+        """
+        positions = storage.list_positions()
+        return [
+            p for p in positions
+            if p.get("quantity")
+            and (instrument is None or p.get("symbol") == instrument)
+        ]
+
+    def unreconciled_positions(self) -> list[dict]:
+        """Book positions this manager does not know about.
+
+        These are positions whose risk is currently unmanaged: no SL, no
+        journal entry, no settlement, and absent from the drawdown and
+        daily-loss accounting. Surfaced rather than hidden so the operator can
+        decide what to do with them.
+        """
+        managed = {t.instrument for t in self._open_trades.values()}
+        return [p for p in self.book_open_positions() if p.get("symbol") not in managed]
+
     def check_all_limits(
         self,
         instrument: Instrument,
@@ -274,11 +306,25 @@ class IctRiskManager:
         """
         with self._lock:
             self._check_daily_reset()
-            
+
             cfg = get_instrument_config(instrument)
             limits = self._limits[instrument]
             blocking_reasons = []
-            
+
+            # 0. POSITIONS NON RAPPROCHEES
+            # A position on the book that this manager did not open has no stop
+            # loss, no journal entry and no settlement path, and it is absent
+            # from the drawdown and daily-loss accounting. Opening a second
+            # position on top of an unmanaged one stacks risk that nothing
+            # measures, so refuse until it is resolved.
+            unreconciled = self.unreconciled_positions()
+            if unreconciled:
+                blocking_reasons.append(
+                    "Positions non rapprochees sur le livre: "
+                    + ", ".join(str(p.get("symbol")) for p in unreconciled)
+                    + " (risque non gere)"
+                )
+
             # 1. LIMITE DE RISQUE PAR TRADE
             # The nominal risk is converted into lots, then rounded to the
             # broker minimum. What matters for the account is the risk actually
@@ -316,7 +362,10 @@ class IctRiskManager:
                 blocking_reasons.append(f"Max consecutive losses: {self._consecutive_losses}/{limits.max_consecutive_losses}")
             
             # 6. POSITIONS SIMULTANÉES
-            open_count = len([t for t in self._open_trades.values() if t.instrument == instrument])
+            # Counted on the order book, not on the trades this manager opened
+            # itself: a position it did not open still occupies the account and
+            # must count against the limit.
+            open_count = len(self.book_open_positions(instrument))
             if open_count >= limits.max_simultaneous_positions:
                 blocking_reasons.append(f"Max simultaneous positions: {open_count}/{limits.max_simultaneous_positions}")
             
@@ -676,7 +725,7 @@ class IctRiskManager:
                         return False, "Pattern d'augmentation de taille détecté (anti-martingale)"
             
             # 4. Détecter nombre excessif de positions simultanées
-            open_positions = len([t for t in self._open_trades.values() if t.instrument == instrument])
+            open_positions = len(self.book_open_positions(instrument))
             if open_positions >= 2:  # Déjà plusieurs positions
                 return False, f"Positions simultanées limitées à 2 (martingale prevention)"
             
@@ -885,7 +934,11 @@ class IctRiskManager:
                 "total_drawdown_pct": round((self._peak_equity - self.current_equity) / self._peak_equity * 100, 2) if self._peak_equity > 0 else 0,
                 "consecutive_losses": self._consecutive_losses,
                 "trades_today": self._trades_today,
-                "open_positions": len(self._open_trades),
+                "open_positions": len(self.book_open_positions()),
+                "managed_positions": len(self._open_trades),
+                "unreconciled_positions": [
+                    p.get("symbol") for p in self.unreconciled_positions()
+                ],
                 "total_trades": len(self._trade_history),
                 "instruments": {
                     sym: self._get_instrument_status(sym)
@@ -896,11 +949,12 @@ class IctRiskManager:
     def _get_instrument_status(self, instrument: Instrument) -> dict:
         limits = self._limits[instrument]
         open_trades = [t for t in self._open_trades.values() if t.instrument == instrument]
-        
+
         return {
             "instrument": instrument,
             "can_trade": False,  # Must be computed via check_all_limits()
-            "open_positions": len(open_trades),
+            "open_positions": len(self.book_open_positions(instrument)),
+            "managed_positions": len(open_trades),
             "trades_today": self._trades_today,  # Global pour l'instant
             "limits": {
                 "max_risk_per_trade_pct": limits.max_risk_per_trade_pct,

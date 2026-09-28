@@ -224,7 +224,10 @@ async def get_risk_metrics() -> RiskMetrics:
 
     trades_today = rm._trades_today
     consecutive_losses = rm._consecutive_losses
-    open_positions = len(rm._open_trades)
+    # Counted on the order book. This used to be len(rm._open_trades), the
+    # risk manager's own list, so a position it did not open was reported as
+    # zero open positions while the OMS showed it holding exposure.
+    open_positions = len(rm.book_open_positions())
 
     limits = rm._limits.get("EURUSD")
     max_trades_remaining = limits.max_trades_per_session - trades_today if limits else 0

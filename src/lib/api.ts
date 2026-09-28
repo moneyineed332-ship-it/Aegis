@@ -386,6 +386,40 @@ if (!apiBaseUrl) {
   throw new Error("VITE_API_URL n'est pas défini. Ajoute-le dans le fichier .env à la racine du projet.");
 }
 
+// The dev server must not silently talk to a remote deployment.
+//
+// Every financial endpoint is authenticated with the single admin token, and
+// that token is entered at runtime into localStorage. So a developer running
+// `npm run dev` against a remote VITE_API_URL signs in to the real machine and
+// the order, emergency-stop and mode endpoints act on it. It looks exactly like
+// local work and is not.
+//
+// This throws at module load in dev only; a production build has DEV=false and
+// is unaffected. Pointing dev at a staging host is legitimate but has to be
+// asked for explicitly, so the escape hatch is a flag rather than a URL
+// someone left in .env.
+if (import.meta.env.DEV && !import.meta.env.VITE_ALLOW_REMOTE_API) {
+  let host = "";
+  try {
+    host = new URL(apiBaseUrl).hostname;
+  } catch {
+    host = apiBaseUrl;
+  }
+  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+  if (!isLocal) {
+    throw new Error(
+      `VITE_API_URL pointe sur un hôte distant (${host}) pendant le développement.\n` +
+        "Le token admin de ce navigateur agit alors sur ce déploiement : ordres, " +
+        "arrêt d'urgence et changement de mode. Pour éviter un accident sur le " +
+        "compte réel :\n" +
+        "  - mets VITE_API_URL=http://localhost:8000 dans .env pour travailler en local, ou\n" +
+        "  - lance le backend en local (AEGIS_API_PORT=8000) et utilise cette URL, ou\n" +
+        "  - si tu vises volontairement un environnement de staging, pose " +
+        "VITE_ALLOW_REMOTE_API=1.",
+    );
+  }
+}
+
 const TOKEN_STORAGE_KEY = "aegis_admin_token";
 
 export function getAdminToken(): string {
