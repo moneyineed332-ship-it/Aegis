@@ -116,7 +116,7 @@ class RiskStatus:
     instrument: Instrument
     can_trade: bool
     blocking_reasons: list[str]
-    
+
     # Métriques actuelles
     current_equity: float
     initial_capital: float
@@ -138,6 +138,13 @@ class RiskStatus:
     volatility_ok: bool
     volatility_reason: str
     volatility_reduction: float = 1.0  # 1.0 = no reduction, 0.5 = 50% reduced
+
+    # "account" when only account-level gates were judged, "signal" when a
+    # candidate entry/stop/target was supplied. The dashboard must not present an
+    # account-only verdict as if a signal had been tested.
+    scope: str = "signal"
+    # Gates that could not be judged in this call, and why.
+    not_evaluated: str | None = None
 
 
 # ============================================================
@@ -304,6 +311,100 @@ class IctRiskManager:
             status.get("news_filter_armed_reason", "unknown"),
             instrument,
         )
+
+    def check_account_limits(self, instrument: Instrument) -> RiskStatus:
+        """Account-level gates only, for a dashboard with no candidate signal.
+
+        The ICT dashboard used to call check_all_limits(instrument, 0, 0, 0) to
+        fill its can_trade field. Zero levels make the R:R zero, so it reported
+        "R:R insuffisant: 0.00 < 1.50" on every instrument, forever: the field
+        could never be true and the reason named a defect in the account rather
+        than the absence of a signal.
+
+        This evaluates what can honestly be judged without entry, stop and
+        target -- unreconciled positions, drawdown, consecutive losses, trades
+        this session, simultaneous positions, session hours, news, and the
+        anti-martingale locks. Gates that need a signal are reported in
+        not_evaluated rather than passed.
+        """
+        with self._lock:
+            self._check_daily_reset()
+            cfg = get_instrument_config(instrument)
+            limits = self._limits[instrument]
+            reasons: list[str] = []
+
+            unreconciled = self.unreconciled_positions()
+            if unreconciled:
+                reasons.append(
+                    "Positions non rapprochees sur le livre: "
+                    + ", ".join(str(p.get("symbol")) for p in unreconciled)
+                    + " (risque non gere)"
+                )
+
+            daily_dd_pct = max(0.0, -self._daily_pnl) / self._session_start_equity if self._session_start_equity > 0 else 0
+            if daily_dd_pct >= limits.max_daily_drawdown_pct:
+                reasons.append(f"Daily drawdown limit: {daily_dd_pct:.1%} >= {limits.max_daily_drawdown_pct:.1%}")
+
+            total_dd_pct = (self._peak_equity - self.current_equity) / self._peak_equity if self._peak_equity > 0 else 0
+            if total_dd_pct >= limits.max_total_drawdown_pct:
+                reasons.append(f"Total drawdown limit: {total_dd_pct:.1%} >= {limits.max_total_drawdown_pct:.1%}")
+
+            if self._trades_today >= limits.max_trades_per_session:
+                reasons.append(f"Max trades/session reached: {self._trades_today}/{limits.max_trades_per_session}")
+
+            if self._consecutive_losses >= limits.max_consecutive_losses:
+                reasons.append(f"Max consecutive losses: {self._consecutive_losses}/{limits.max_consecutive_losses}")
+
+            open_count = len(self.book_open_positions(instrument))
+            if open_count >= limits.max_simultaneous_positions:
+                reasons.append(f"Max simultaneous positions: {open_count}/{limits.max_simultaneous_positions}")
+
+            session_allowed = is_trading_allowed(instrument)
+            session_status = get_session_status(instrument)
+            session_reason = "OK" if session_allowed else f"Hors session (prochaine dans {session_status.get('time_until_next_session_seconds', 0)/60:.0f}min)"
+            if not session_allowed:
+                reasons.append(session_reason)
+
+            news_blocked = is_news_blocking(instrument)
+            news_reason = "OK" if not news_blocked else get_news_status(instrument).get("block_reason", "News bloquante")
+            if news_blocked:
+                reasons.append(news_reason)
+
+            if self._revenge_trading_blocked:
+                reasons.append("Revenge trading bloqué après perte significative")
+            if self._position_size_locked and instrument in self._locked_position_size:
+                reasons.append(
+                    f"Position size verrouillée à {self._locked_position_size[instrument]:.2f} lots après perte"
+                )
+
+            return RiskStatus(
+                instrument=instrument,
+                can_trade=not reasons,
+                blocking_reasons=reasons,
+                current_equity=self.current_equity,
+                initial_capital=self.initial_capital,
+                daily_pnl=self._daily_pnl,
+                daily_pnl_pct=daily_dd_pct,
+                total_drawdown_pct=total_dd_pct,
+                consecutive_losses=self._consecutive_losses,
+                trades_today=self._trades_today,
+                open_positions=open_count,
+                limits=limits,
+                session_allowed=session_allowed,
+                session_reason=session_reason,
+                news_blocked=news_blocked,
+                news_reason=news_reason,
+                scope="account",
+                not_evaluated=(
+                    "risque effectif, distance du SL, R:R et volatilite (ATR) "
+                    "dependent du signal candidat"
+                ),
+                # Not judged here: there is no candidate signal, so there is no
+                # ATR to compare and no volatility reduction to apply. Reported
+                # as unknown rather than as a pass.
+                volatility_ok=False,
+                volatility_reason="non evaluable sans signal (ATR inconnu)",
+            )
 
     def check_all_limits(
         self,

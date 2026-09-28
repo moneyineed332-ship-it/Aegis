@@ -232,7 +232,7 @@ async def get_risk_metrics() -> RiskMetrics:
     limits = rm._limits.get("EURUSD")
     max_trades_remaining = limits.max_trades_per_session - trades_today if limits else 0
 
-    risk_status = rm.check_all_limits("EURUSD", 0.0, 0.0, 0.0)
+    risk_status = rm.check_account_limits("EURUSD")
 
     return RiskMetrics(
         next_trade_risk=next_trade_risk,
@@ -256,7 +256,11 @@ async def get_risk_status(instrument: Instrument = Query("EURUSD")) -> RiskStatu
     if not rm:
         raise HTTPException(status_code=503, detail="Risk Manager not initialized")
 
-    return rm.check_all_limits(instrument, 0.0, 0.0, 0.0)
+    # Account-level gates only. This used to call check_all_limits with zero
+    # levels, so the R:R was 0 against a 1.50 minimum and can_trade was
+    # permanently False with "R:R insuffisant" as the reason -- a verdict on the
+    # account that was really the absence of a signal.
+    return rm.check_account_limits(instrument)
 
 
 @router.get("/news-status")
