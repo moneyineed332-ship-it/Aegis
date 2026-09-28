@@ -50,24 +50,50 @@ Engine state lives in SQLite on a Fly volume. With more than one machine, each
 keeps its own in-memory copy and they overwrite each other. Deploy a single
 machine, or move the engine state behind a shared store.
 
-## 3. Optimiser and lab evaluate in-sample
+## 3. The optimiser selects on in-sample data
 
-`optimizer.py` and `lab.py` report the best result over the data they were
-measured on. Treat their output as a hypothesis, not a validated edge. This has
-not been re-verified since the initial audit.
+`optimizer.py` scores every candidate on the same candles and returns the best
+one. There is no train/test split and no out-of-sample step.
 
-## 4. Position modes B, C and D are unreachable
+Measured on 1 988 real EURUSD 15m candles, 28 parameter sets, ranking done on a
+first two thirds and evaluated on the last third:
 
-`fixed_tp` (mode A) is what runs. The partial, breakeven and
-trailing-structural modes exist in `position_manager.py` but nothing selects
-them, and the take-profit picks the furthest available liquidity level rather
-than the nearest. Not re-verified since the initial audit.
+    best on training   -41.70  ->  -56.24 out-of-sample   (35 % degradation)
+    grid median        -54.76  ->  -58.38
 
-## 5. Not re-verified since the initial audit
+The training winner is only marginally ahead of picking a parameter set at
+random, so its apparent edge is mostly noise. A further warning: the score is
+an annualised Sharpe computed on a 15-minute series, multiplied by a factor of
+187, which is why values land around -50. Ranking on that number is ranking on
+noise. Use the walk-forward helpers in `backtesting.py` and
+`backtesting_advanced.py` instead of `optimize_*`, and treat any recommendation
+as a hypothesis.
 
-Items carried forward without being re-checked in the recent work. They are
-listed so they are not mistaken for covered ground: optimiser/lab (3), ICT modes
-and TP selection (4), Prometheus path cardinality.
+## 4. No strategy currently qualifies on out-of-sample evidence
+
+The paper-candidate gate in `lab.py` used to read
+`metrics.get("out_of_sample_metrics", metrics)`, so a run with no held-out
+portion was judged on the data its own parameters were picked from. It is now
+fixed: only out-of-sample metrics are read, and a run without them is refused
+as "no evidence" rather than silently substituted.
+
+On the 52 stored backtests that had already inverted the result:
+
+    eligible on real out-of-sample evidence        0
+    eligible ONLY through the in-sample fallback    7
+
+The gate was promoting exactly the runs with no evidence behind them, and
+refusing every walk-forward run that did have a held-out portion. After the fix
+it promotes nothing, because nothing in the store clears the thresholds out of
+sample. That is the real state of the research, and it is unchanged by the fix:
+no strategy has demonstrated a paper-worthy edge.
+
+## 5. Prometheus path cardinality
+
+`/metrics` exposes raw path labels, so cardinality grows with distinct URLs.
+The scrape target is on a 10 second interval, and 10s on a single machine is
+affordable, but the label set still needs templating before more instances
+exist. Not re-verified since the initial audit.
 
 ---
 
@@ -88,4 +114,8 @@ each with a test pinning it:
 | Every instrument can actually trade | `IctRiskManager._init_default_limits` clamp |
 | Admin token never in a URL | `deps.issue_ws_ticket` |
 | Financial reads require the token | `test_route_auth_inventory` |
+| No paper candidate without held-out evidence | `lab.promotion_decision` |
+| Take-profit at the nearest liquidity pool | `ict_signal_generator._nearest_liquidity_target` |
+| Modes B, C and D selectable | `ict_dashboard.set_position_mode` |
+| `can_trade` reflects a real check | `IctRiskManager.check_account_limits` |
 | Dev server cannot reach production | `api.ts` dev guard |
