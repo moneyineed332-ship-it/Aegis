@@ -34,6 +34,14 @@ def _isolated_db(tmp_path, monkeypatch):
         "consecutive_losses": 0,
         "trade_history": [],
     })
+    # regime.classify keeps hysteresis state between calls, so a test that runs
+    # a full analysis cycle leaves a confident regime behind that silently
+    # overrides the next call's result. Reset it so classify() is
+    # order-independent under test, the way a fresh process would be.
+    import app.regime as regime_mod
+    regime_mod._HYSTERESIS.clear()
+    regime_mod._prev_regime = None
+    regime_mod._prev_confidence = 0.0
     yield
     # Cleanup: close connection and remove temp DB
     if storage._db_connection:

@@ -60,17 +60,50 @@ def _now_iso() -> str:
 
 _STATE_KEYS = ("last_prices", "last_signal", "last_analyses", "last_smc_analysis", "last_mtf_analysis", "cycle_count")
 
+# State that describes what the trading pipeline last looked at, and therefore
+# belongs to the mode that produced it. Both pipelines write the same in-memory
+# variables -- the ICT path sets _last_signal at line ~386 with
+# strategy="ict_smc", the legacy path at ~613 with the Donchian strategy -- so
+# without a mode tag a crypto run's state is restored into a Forex run.
+#
+# Observed on a local ICT run: /api/v1/engine/status reported
+# last_signal = {"symbol": "ETHUSDT", "strategy": "donchian_breakout_long_flat"}
+# and last_smc_analysis keys of PAXGUSDT/BTCUSDT/ETHUSDT, while symbols
+# correctly listed EURUSD/GBPUSD/XAUUSD. The operator saw a Forex bot quoting a
+# crypto trade it never made.
+#
+# Not scoped, deliberately: status, started_at, stopped_at and circuit_breaker
+# are mode-independent and must survive a restart and a mode change. The ICT
+# risk manager and position manager keep their own keys for the same reason --
+# a risk lock must never be dropped because the mode flag moved.
+_MODE_SCOPED_STATE_KEYS = (
+    "last_prices",
+    "last_signal",
+    "last_analyses",
+    "last_smc_analysis",
+    "last_mtf_analysis",
+    "last_ict_signals",
+)
+
+
+def _state_mode() -> str:
+    return "ict" if config.ICT_MODE else "legacy"
+
+
+def _scoped_state_key(key: str) -> str:
+    return f"{key}::{_state_mode()}"
+
 
 def _save_state() -> None:
     """Persist engine state to DB for recovery after restart."""
     try:
-        storage.set_engine_state("last_prices", json.dumps(_last_prices))
-        storage.set_engine_state("last_signal", json.dumps(_last_signal) if _last_signal else "")
-        storage.set_engine_state("last_analyses", json.dumps(_last_analyses))
-        storage.set_engine_state("last_smc_analysis", json.dumps(_last_smc_analysis))
-        storage.set_engine_state("last_mtf_analysis", json.dumps(_last_mtf_analysis))
+        storage.set_engine_state(_scoped_state_key("last_prices"), json.dumps(_last_prices))
+        storage.set_engine_state(_scoped_state_key("last_signal"), json.dumps(_last_signal) if _last_signal else "")
+        storage.set_engine_state(_scoped_state_key("last_analyses"), json.dumps(_last_analyses))
+        storage.set_engine_state(_scoped_state_key("last_smc_analysis"), json.dumps(_last_smc_analysis))
+        storage.set_engine_state(_scoped_state_key("last_mtf_analysis"), json.dumps(_last_mtf_analysis))
+        storage.set_engine_state(_scoped_state_key("last_ict_signals"), json.dumps(_last_ict_signals))
         storage.set_engine_state("cycle_count", str(_cycle_count))
-        storage.set_engine_state("last_ict_signals", json.dumps(_last_ict_signals))
         # ICT/SMC persistence (risk locks, open positions)
         if _ict_risk_manager is not None:
             _ict_risk_manager.save_state()
@@ -78,6 +111,7 @@ def _save_state() -> None:
             _ict_position_manager.save_state()
     except Exception as exc:
         logger.warning("Failed to save engine state: %s", exc)
+
 
 
 # ============================================================
@@ -184,15 +218,18 @@ async def task_fetch_prices():
 async def task_fetch_analysis():
     """Fetch OHLCV for all symbols, compute features, regime, and SMC/ICT analysis with multi-TF hierarchy."""
     global _last_analysis, _last_smc_analysis, _last_mtf_analysis, _last_analyses
-    # Same priority as market_data.SYMBOLS: ICT universe first when
-    # ICT_MODE is on, then focused crypto universe, then defaults.
-    if config.ICT_MODE and hasattr(config, 'ICT_SYMBOLS'):
-        symbols = config.ICT_SYMBOLS
-    elif config.FOCUSED_MODE:
-        symbols = config.FOCUSED_SYMBOLS
-    else:
-        symbols = config.SYMBOLS
-    
+    # One resolver for the tradeable universe, shared with get_engine_status,
+    # so the status cannot list a different set than the engine iterates.
+    symbols = config.resolve_symbols()
+
+    # These dicts are keyed by symbol and were only ever added to, so a symbol
+    # that drops out of the universe keeps its last analysis forever. Rebuilt
+    # from scratch each cycle: a symbol whose data failed this round then has no
+    # entry, which is truthful, instead of a stale one from minutes ago.
+    _last_smc_analysis.clear()
+    _last_mtf_analysis.clear()
+    _last_analyses.clear()
+
     for symbol in symbols:
         try:
             # Multi-timeframe analysis according to ICT/SMC hierarchy
@@ -223,7 +260,7 @@ async def task_fetch_analysis():
 
                     if len(candles) >= 50:
                         feats = features.latest_features(candles)
-                        regime_result = regime.classify(feats)
+                        regime_result = regime.classify(feats, symbol=symbol)
                         _last_analysis = {"symbol": symbol, "timeframe": tf, "category": category, "features": feats, "regime": regime_result}
                         _last_analyses[f"{symbol}_{tf}"] = _last_analysis
                         
@@ -1236,43 +1273,81 @@ def _get_cycle_id() -> str:
 
 
 def _restore_state() -> None:
-    """Restore persistent in-memory state from DB on engine startup."""
-    global _last_prices, _last_signal, _last_analyses, _last_smc_analysis, _last_mtf_analysis, _cycle_count
+    """Restore persistent in-memory state from DB on engine startup.
 
-    # Restore engine state (prices, signal, analyses)
+    Only the state belonging to the active mode is read: the keys are tagged
+    with the mode (see _MODE_SCOPED_STATE_KEYS), so a Donchian crypto run can no
+    longer hand its signal and analyses to an ICT Forex run.
+    """
+    global _last_prices, _last_signal, _last_analyses, _last_smc_analysis, _last_mtf_analysis, _cycle_count, _last_ict_signals
+
+    mode = _state_mode()
+    # Nothing survives a mode change: the in-memory dicts are rebuilt by the
+    # first analysis cycle, and a partially restored mix is exactly the state
+    # that made the dashboard show a crypto signal next to Forex symbols.
+    _last_prices = {}
+    _last_signal = None
+    _last_analyses = {}
+    _last_smc_analysis = {}
+    _last_mtf_analysis = {}
+    _last_ict_signals = {}
+
+    # Retire state written before the keys were tagged with a mode. Those values
+    # belong to no known mode, so nothing may read them, and leaving them in the
+    # table would keep this warning firing on every restart and invite someone
+    # debugging state to trust them.
+    for legacy_key in _MODE_SCOPED_STATE_KEYS:
+        if storage.get_engine_state(legacy_key) is None:
+            continue
+        logger.warning(
+            "Discarding unscoped engine state %r left by an older build; it is "
+            "not attributable to a mode and will not be read",
+            legacy_key,
+        )
+        storage.delete_engine_state(legacy_key)
+
     try:
-        raw = storage.get_engine_state("last_prices")
+        raw = storage.get_engine_state(_scoped_state_key("last_prices"))
         if raw:
             _last_prices = json.loads(raw)
-            logger.info("Restored last_prices for %d symbol(s)", len(_last_prices))
+            logger.info("Restored [%s] last_prices for %d symbol(s)", mode, len(_last_prices))
 
-        raw = storage.get_engine_state("last_signal")
+        raw = storage.get_engine_state(_scoped_state_key("last_signal"))
         if raw:
             _last_signal = json.loads(raw)
-            logger.info("Restored last_signal: %s %s", _last_signal.get("symbol"), _last_signal.get("recommendation", {}).get("action"))
+            logger.info(
+                "Restored [%s] last_signal: %s %s",
+                mode,
+                _last_signal.get("symbol"),
+                _last_signal.get("recommendation", {}).get("action"),
+            )
 
-        raw = storage.get_engine_state("last_analyses")
+        raw = storage.get_engine_state(_scoped_state_key("last_analyses"))
         if raw:
             _last_analyses = json.loads(raw)
-            logger.info("Restored last_analyses for %d entries", len(_last_analyses))
+            logger.info("Restored [%s] last_analyses for %d entries", mode, len(_last_analyses))
 
-        raw = storage.get_engine_state("last_smc_analysis")
+        raw = storage.get_engine_state(_scoped_state_key("last_smc_analysis"))
         if raw:
             _last_smc_analysis = json.loads(raw)
 
-        raw = storage.get_engine_state("last_mtf_analysis")
+        raw = storage.get_engine_state(_scoped_state_key("last_mtf_analysis"))
         if raw:
             _last_mtf_analysis = json.loads(raw)
 
+        raw = storage.get_engine_state(_scoped_state_key("last_ict_signals"))
+        if raw:
+            _last_ict_signals = json.loads(raw)
+            logger.info("Restored [%s] last_ict_signals for %d instruments", mode, len(_last_ict_signals))
+
+        # The cycle counter is a diagnostic, not mode-specific, so it stays
+        # unscoped.
         raw = storage.get_engine_state("cycle_count")
         if raw:
             _cycle_count = int(raw)
-
-        raw = storage.get_engine_state("last_ict_signals")
-        if raw:
-            _last_ict_signals = json.loads(raw)
     except Exception as exc:
         logger.warning("Failed to restore engine state: %s", exc)
+
 
     # Restore trailing stops
     try:
@@ -1367,7 +1442,7 @@ def get_engine_status() -> dict:
         "focused_mode": config.FOCUSED_MODE,
         "started_at": started_at,
         "cycle_count": _cycle_count,
-        "symbols": list(market_data.SYMBOLS),
+        "symbols": list(config.resolve_symbols()),
         "last_prices": _last_prices,
         "last_analysis": {
             "symbol": _last_analysis["symbol"],

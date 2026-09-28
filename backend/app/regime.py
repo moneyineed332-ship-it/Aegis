@@ -18,6 +18,10 @@ PROBABILITY_FLOOR = 0.05
 _prev_regime: str | None = None
 _prev_confidence: float = 0.0
 _regime_lock = threading.Lock()
+# Hysteresis state keyed by instrument, so one symbol cannot bias another.
+_HYSTERESIS: dict[str, tuple[str, float]] = {}
+# Bucket for callers that do not identify their instrument.
+_DEFAULT_SCOPE = "__default__"
 
 REGIME_LABELS = {
     "bull_trend": "Tendance Haussière",
@@ -30,7 +34,7 @@ REGIME_LABELS = {
 }
 
 
-def classify(features: dict, hysteresis: float = 0.15) -> dict:
+def classify(features: dict, hysteresis: float = 0.15, symbol: str | None = None) -> dict:
     """Classify the current market regime from explainable features.
 
     Uses ADX for trend strength, RSI/Stochastic RSI for momentum,
@@ -46,6 +50,15 @@ def classify(features: dict, hysteresis: float = 0.15) -> dict:
       7. range — fallback / consolidation
     """
     global _prev_regime, _prev_confidence
+
+    # Hysteresis state is per instrument. It used to be a single module global,
+    # so one symbol's regime was decided partly by whatever the previous symbol
+    # was classified as. Calling classify() in sequence for the three
+    # correlated pairs EURUSD/GBPUSD/XAUUSD let the first call's
+    # high-confidence regime override the others, and the same input returned a
+    # different answer depending on call history.
+    scope = symbol or _DEFAULT_SCOPE
+    prev_regime, prev_confidence = _HYSTERESIS.get(scope, (None, 0.0))
 
     # Use all available features
     trend_strength = features.get("sma_ratio", features.get("sma_20", 0) / max(features.get("sma_50", 1), 1) - 1)
@@ -95,17 +108,23 @@ def classify(features: dict, hysteresis: float = 0.15) -> dict:
     # --- Range: fallback ---
     else:
         regime = "range"
-        confidence = min(0.7, 0.4 + (1 - abs(trend_strength) * 8) * 0.3)
+        # Clamped at both ends. trend_strength falls back to -1 when no moving
+        # average is present in the features, and `1 - abs(ts) * 8` then goes
+        # deeply negative, which produced confidences such as -1.7 and fed a
+        # negative value into the probability distribution.
+        confidence = max(0.0, min(0.7, 0.4 + (1 - abs(trend_strength) * 8) * 0.3))
 
     # --- Hysteresis: prevent flip-flopping at boundaries ---
     with _regime_lock:
-        if _prev_regime and _prev_regime != regime:
-            if _prev_confidence > confidence + hysteresis:
-                regime = _prev_regime
-                confidence = _prev_confidence
+        if prev_regime and prev_regime != regime:
+            if prev_confidence > confidence + hysteresis:
+                regime = prev_regime
+                confidence = prev_confidence
 
-        _prev_regime = regime
-        _prev_confidence = confidence
+        _HYSTERESIS[scope] = (regime, confidence)
+        # Kept for backwards compatibility with anything reading the old
+        # module-level values.
+        _prev_regime, _prev_confidence = regime, confidence
 
     confidence = round(confidence, 4)
 

@@ -177,10 +177,25 @@ def active_capital() -> float:
     return ICT_PAPER_CAPITAL if ICT_MODE else PAPER_CAPITAL
 
 
+def resolve_symbols() -> tuple[str, ...]:
+    """The tradeable universe for the currently active mode, resolved now.
+
+    market_data.SYMBOLS is a snapshot taken at import time, while the engine
+    re-evaluates the mode on every cycle. Two sources of truth for "what does
+    this bot trade" is how a status endpoint ends up listing one universe while
+    the engine iterates another. Callers that care about the live answer use
+    this.
+    """
+    if ICT_MODE and ICT_SYMBOLS:
+        return tuple(ICT_SYMBOLS)
+    if FOCUSED_MODE and FOCUSED_SYMBOLS:
+        return tuple(FOCUSED_SYMBOLS)
+    return tuple(SYMBOLS)
+
+
 def active_symbols() -> tuple:
     """Tradeable universe for the currently active mode."""
-    from . import market_data as _md
-    return tuple(_md.SYMBOLS)
+    return resolve_symbols()
 
 
 def _resolve_notional_caps() -> tuple[float, float]:

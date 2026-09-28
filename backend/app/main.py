@@ -362,7 +362,7 @@ def market_analysis(
         market_features = features.latest_features(candles)
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
-    return {"symbol": symbol, "interval": interval, "features": market_features, "regime": regime.classify(market_features)}
+    return {"symbol": symbol, "interval": interval, "features": market_features, "regime": regime.classify(market_features, symbol=symbol)}
 
 
 @app.post("/api/v1/decisions/recommendation", status_code=201)
@@ -813,7 +813,7 @@ async def check_alerts(_admin: None = Depends(require_admin_token)) -> dict:
         if dd_alert:
             alerts.append(dd_alert)
 
-        regime_result = regime.classify(feat)
+        regime_result = regime.classify(feat, symbol=symbol)
         regime_alert = alert_manager.check_regime(regime_result, symbol)
         if regime_alert:
             alerts.append(regime_alert)
@@ -1217,7 +1217,7 @@ def train_ml_regime(request: Request, symbol: str = "BTCUSDT", interval: str = "
         try:
             feat = features.latest_features(window_candles)
             feature_sets.append(feat)
-            regime_result = regime.classify(feat)
+            regime_result = regime.classify(feat, symbol=symbol)
             regime_labels.append(regime_result["regime"])
         except ValueError:
             continue
@@ -1238,7 +1238,7 @@ def predict_regime(symbol: str = "BTCUSDT", interval: str = "1h", _admin: None =
 
     feat = features.latest_features(candles)
     prediction = ml_regime.predictor.predict(feat)
-    rule_based = regime.classify(feat)
+    rule_based = regime.classify(feat, symbol=symbol)
 
     return {
         "symbol": symbol,

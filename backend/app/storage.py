@@ -862,6 +862,16 @@ def set_engine_state(name: str, value: str) -> None:
         )
 
 
+def delete_engine_state(name: str) -> None:
+    """Remove a named engine state value.
+
+    Used to retire keys written by an older schema, so a stale value cannot sit
+    in the table being read by something, or by a human investigating state.
+    """
+    with connection() as database:
+        database.execute("DELETE FROM engine_state WHERE name = ?", (name,))
+
+
 def log_engine_event(cycle_id: str, event_type: str, details: dict | None = None, severity: str = "info") -> None:
     """Log an engine event."""
     timestamp = datetime.now(timezone.utc).isoformat()
