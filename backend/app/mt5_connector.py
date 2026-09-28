@@ -17,7 +17,16 @@ try:
     MT5_AVAILABLE = True
 except ImportError:
     MT5_AVAILABLE = False
-    logger.warning("MetaTrader5 not installed. Install with: pip install MetaTrader5")
+
+if not MT5_AVAILABLE:
+    # Logged once, at import, and not at ERROR. MetaTrader5 is a Windows-only
+    # package: it is simply absent on every container deployment, and that is a
+    # normal configuration rather than a failure. Emitting it at ERROR on each
+    # call buried real errors under 237 lines of expected noise.
+    logger.info(
+        "MetaTrader5 not installed; Forex data will come from Yahoo Finance. "
+        "Install the MetaTrader5 package to use a local MT5 terminal."
+    )
 
 
 # ============================================================
@@ -74,7 +83,9 @@ class MT5Connector:
             True if connection successful, False otherwise
         """
         if not MT5_AVAILABLE:
-            logger.error("MetaTrader5 not available. Install with: pip install MetaTrader5")
+            # The absence of the package was already reported once at import.
+            # Repeating it per call is what turned an expected condition into the
+            # loudest log line in the container.
             return False
         
         if self._initialized and self._connected:

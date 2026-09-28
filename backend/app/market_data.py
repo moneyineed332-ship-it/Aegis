@@ -24,6 +24,11 @@ _http_client: httpx.Client | None = None
 # MT5 connector for Forex data
 _mt5_connector = None
 
+# Data-source fallbacks already reported, as (reason, symbol, interval). The
+# source on a given host does not change between cycles, so re-logging the same
+# fallback every time only buries the messages that carry new information.
+_LOGGED_FALLBACKS: set[tuple[str, str, str]] = set()
+
 
 def _get_http_client() -> httpx.Client:
     """Get or create a shared httpx client with connection pooling."""
@@ -226,7 +231,13 @@ def fetch_spot_prices() -> list[dict]:
     # Fetch Forex prices via MT5 (Yahoo fallback when unavailable)
     if forex_symbols:
         mt5_conn = _get_mt5_connector()
-        if mt5_conn is not None:
+        # Must be the same usability probe as _fetch_ohlcv_mt5. The plain
+        # `is not None` check left fetch_tick calling initialize() on every
+        # symbol of every cycle, and initialize() logs an ERROR when the
+        # MetaTrader5 package is missing: 237 ERROR lines on a container where
+        # MT5 can never be present, which is what a missing dependency looks
+        # like, not a failure.
+        if _mt5_is_usable(mt5_conn):
             for symbol in forex_symbols:
                 try:
                     tick = mt5_conn.fetch_tick(symbol)
@@ -342,6 +353,20 @@ def fetch_ohlcv(symbol: str, interval: str, limit: int, end_time: int | None = N
         return _fetch_ohlcv_fallback(symbol, interval, limit, end_time)
 
 
+def _log_fallback_once(reason: str, symbol: str, interval: str, template: str) -> None:
+    """Log a data-source fallback once per (reason, symbol, timeframe).
+
+    The fallback itself is reported per call, not per call per symbol: on a
+    container the source never changes, so repeating the line every cycle only
+    hides the lines that matter.
+    """
+    key = (reason, symbol, interval)
+    if key in _LOGGED_FALLBACKS:
+        return
+    _LOGGED_FALLBACKS.add(key)
+    logger.info(template, symbol, interval)
+
+
 def _mt5_is_usable(mt5_conn) -> bool:
     """True when the connector exists AND the terminal is actually connected.
 
@@ -376,7 +401,11 @@ def _fetch_ohlcv_mt5(symbol: str, interval: str, limit: int, end_time: int | Non
     """
     mt5_conn = _get_mt5_connector()
     if not _mt5_is_usable(mt5_conn):
-        logger.info("MT5 unavailable, using Yahoo Finance fallback for %s %s", symbol, interval)
+        # Logged once per symbol and timeframe, not once per call. At 3 symbols
+        # x 4 timeframes on a 5-minute analysis cycle this was 12 lines every
+        # cycle, which was 985 of the 1 246 lines in a 20-minute local run.
+        _log_fallback_once("mt5_unusable", symbol, interval,
+                           "MT5 unavailable, using Yahoo Finance fallback for %s %s")
         return _fetch_ohlcv_yahoo(symbol, interval, limit)
 
     try:
@@ -384,7 +413,8 @@ def _fetch_ohlcv_mt5(symbol: str, interval: str, limit: int, end_time: int | Non
         candles = mt5_conn.fetch_ohlcv(symbol, interval, limit, None, end_date)
 
         if not candles:
-            logger.info("MT5 returned no candles for %s %s, using Yahoo Finance fallback", symbol, interval)
+            _log_fallback_once("mt5_empty", symbol, interval,
+                               "MT5 returned no candles for %s %s, using Yahoo Finance fallback")
             return _fetch_ohlcv_yahoo(symbol, interval, limit)
 
         interval_ms = _interval_to_ms(interval)
