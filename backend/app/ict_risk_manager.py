@@ -209,7 +209,14 @@ class IctRiskManager:
                 if symbol == "XAUUSD":
                     max_risk_pct = cfg.risk_per_trade_pct * 0.8  # 20% moins de risque
                     max_daily_dd = cfg.max_daily_drawdown_pct * 0.8  # DD plus strict
-                    max_trades = cfg.max_trades_per_session - 1  # Moins de trades
+                    # Clamped at 1. This subtraction used to take XAU/USD to
+                    # zero: the config already gives gold 1 trade per session
+                    # against the pairs' 2, so the extra -1 was a second
+                    # discount. The gate is `_trades_today >= max_trades_per_session`,
+                    # and 0 >= 0 is always true, so gold was blocked from opening
+                    # any position, ever, while still being listed in
+                    # active_instruments. A reduction must never reach zero.
+                    max_trades = max(1, cfg.max_trades_per_session - 1)
                     max_simultaneous = 1  # MAX 1 position simultanée pour XAU/USD
                 else:
                     max_risk_pct = cfg.risk_per_trade_pct

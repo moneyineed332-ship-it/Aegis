@@ -30,7 +30,20 @@ def _decrypt_env(value: str) -> str:
 # --- Mode ---
 MODE = os.getenv("AEGIS_MODE", "paper")  # "paper" | "live"
 ADMIN_TOKEN = _decrypt_env(os.getenv("AEGIS_ADMIN_TOKEN", ""))
-CORS_ORIGINS = [o.strip() for o in os.getenv("AEGIS_CORS_ORIGINS", "http://localhost:5173,https://aegis-orpin-xi.vercel.app").split(",") if o.strip()]
+# Both loopback spellings are listed because Vite prints the 127.0.0.1 URL, so
+# following the link it displays produced a bare 400 from CORSMiddleware and an
+# error that looked exactly like a rejected admin token. 5173 is the dev server
+# and 4173 the preview server; Vite also walks up from 5173 if a port is taken,
+# so AEGIS_CORS_ORIGINS can be extended when needed.
+_DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5173,"
+    "http://127.0.0.1:5173,"
+    "http://localhost:4173,"
+    "http://127.0.0.1:4173,"
+    "https://aegis-orpin-xi.vercel.app"
+)
+CORS_ORIGINS = [o.strip() for o in os.getenv("AEGIS_CORS_ORIGINS", _DEFAULT_CORS_ORIGINS).split(",") if o.strip()]
+
 PAPER_CAPITAL = float(os.getenv("AEGIS_INITIAL_CAPITAL", "20"))
 
 # --- ICT/SMC Bot Capital ---
