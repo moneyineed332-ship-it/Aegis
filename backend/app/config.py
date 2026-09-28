@@ -52,6 +52,12 @@ ICT_PAPER_CAPITAL = float(os.getenv("AEGIS_ICT_CAPITAL", "50"))  # 50€ pour le
 # this capital: a 50 EUR account cannot risk-manage a 1 085 EUR minimum lot.
 # Paper mode only, refused otherwise. See ict_config._apply_micro_contracts.
 ICT_MICRO_CONTRACTS = os.getenv("AEGIS_ICT_MICRO_CONTRACTS", "1") not in ("0", "false", "False")
+# Position management mode (cahier §10). A = fixed_tp, B = partial, C = breakeven,
+# D = trailing_structural. All four are implemented in PositionManager, but
+# nothing selected them: the engine built the manager with the default, so B, C
+# and D were unreachable in a running bot. Default stays A, which is the only one
+# that was ever exercised.
+ICT_POSITION_MODE = os.getenv("AEGIS_ICT_POSITION_MODE", "fixed_tp")
 
 # --- Database ---
 DB_PATH = os.getenv("AEGIS_DB_PATH", str(Path(__file__).resolve().parent.parent / "data" / "aegis.db"))

@@ -139,8 +139,12 @@ def _init_ict_pipeline() -> bool:
             _ict_risk_manager = IctRiskManager(initial_capital=config.ICT_PAPER_CAPITAL)
             logger.info("ICT Risk Manager initialized (capital=%.0f€)", config.ICT_PAPER_CAPITAL)
         if _ict_position_manager is None:
-            _ict_position_manager = PositionManager(risk_manager=_ict_risk_manager)
-            logger.info("ICT Position Manager initialized")
+            _ict_position_manager = PositionManager(
+                mode=config.ICT_POSITION_MODE,
+                risk_manager=_ict_risk_manager,
+            )
+            logger.info("ICT Position Manager initialized (mode=%s)", config.ICT_POSITION_MODE)
+
         # Restore persisted ICT state once (not every cycle, or DB
         # snapshots would clobber hot in-memory mutations).
         if not _ict_state_restored:

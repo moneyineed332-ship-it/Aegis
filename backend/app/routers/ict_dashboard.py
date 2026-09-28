@@ -18,6 +18,7 @@ from ..ict_risk_manager import IctRiskManager, RiskStatus
 from ..deps import require_admin_token
 from ..position_manager import PositionManager, Position
 from ..trade_journal import TradeJournal
+from .. import config
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +277,37 @@ async def get_news_status(instrument: Instrument = Query("EURUSD")) -> dict:
     from ..news_filter import get_news_status as _news_status
 
     return _news_status(instrument)
+
+
+@router.get("/position-mode")
+async def get_position_mode() -> dict:
+    """Which of the four §10 management modes is actually in force."""
+    pm = _get_position_manager()
+    return {
+        "mode": pm.mode if pm else None,
+        "available_modes": ["fixed_tp", "partial", "breakeven", "trailing_structural"],
+        "initialized": pm is not None,
+    }
+
+
+@router.post("/position-mode")
+async def set_position_mode(mode: str) -> dict:
+    """Select the §10 management mode. A = fixed_tp, B = partial, C = breakeven,
+    D = trailing_structural.
+
+    The mode applies to positions opened from now on; positions already open keep
+    the mode they were opened with, because switching mid-trade would change how
+    an existing stop is managed.
+    """
+    pm = _get_position_manager()
+    if not pm:
+        raise HTTPException(status_code=503, detail="Position Manager not initialized")
+    allowed = ("fixed_tp", "partial", "breakeven", "trailing_structural")
+    if mode not in allowed:
+        raise HTTPException(status_code=422, detail=f"mode must be one of {allowed}")
+    pm.set_mode(mode)
+    config.ICT_POSITION_MODE = mode
+    return {"mode": pm.mode, "previous": None, "applied_to": "positions opened from now on"}
 
 
 # ============================================================
