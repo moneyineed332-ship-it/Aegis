@@ -1,5 +1,16 @@
 # AEGIS AI Quant - ICT/SMC Forex Bot Audit Report
 
+> **Superseded.** The conclusion below ("AUDIT RESULT: PASSED", all 8 modules
+> validated) does not hold. It was written before the runtime audit, and
+> several of the modules it cleared had live defects: XAU/USD could never open
+> a position, the economic-news gate had no data source at all, the OHLCV
+> quality check rejected every real Forex series so no analysis ever ran, the
+> execution path submitted orders when the risk manager was missing, and the
+> MicroTrader5 fallback left the Forex feed empty on any container.
+>
+> It is kept for history only. For what the system does and does not protect
+> against, see [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
+
 **Date**: 2025-01-XX  
 **Project**: AEGIS AI Quant - ICT/SMC Forex Trading Bot  
 **Audit Scope**: Complete validation of ICT/SMC modules integration
