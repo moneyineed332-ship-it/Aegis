@@ -174,6 +174,9 @@ class IctRiskManager:
         self._daily_pnl = 0.0
         self._trades_today = 0
         self._consecutive_losses = 0
+        # Reported once per process: the economic-news gate has no real data
+        # source, so it cannot block anything. See NewsFilter.is_armed.
+        self._news_gate_warned = False
         self._last_reset_date = date.today()
         self._session_start_equity = initial_capital
         
@@ -283,6 +286,24 @@ class IctRiskManager:
         """
         managed = {t.instrument for t in self._open_trades.values()}
         return [p for p in self.book_open_positions() if p.get("symbol") not in managed]
+
+    def _log_news_gate_inert(self, instrument: Instrument, status: dict) -> None:
+        """Say once, at WARNING, that the news gate cannot block.
+
+        Per signal this would be one line per instrument per cycle. Once per
+        process is enough to make the gap visible without becoming the log noise
+        this work removed elsewhere.
+        """
+        if self._news_gate_warned:
+            return
+        self._news_gate_warned = True
+        logger.warning(
+            "Economic-news filter is NOT armed (%s). Trade risk around high-impact "
+            "news is unmanaged for %s; this gate cannot block until a real calendar "
+            "source is configured.",
+            status.get("news_filter_armed_reason", "unknown"),
+            instrument,
+        )
 
     def check_all_limits(
         self,
@@ -394,8 +415,17 @@ class IctRiskManager:
                 blocking_reasons.append(session_reason)
             
             # 10. FILTRE NEWS ÉCONOMIQUE
+            # The filter is armed only when a real calendar source exists. It does
+            # not today: the only producer is a simulated calendar whose events
+            # are skipped on purpose, so this check was reporting a protection
+            # that was never performed. Logged rather than blocking, because
+            # failing closed on a permanently empty calendar would halt trading
+            # for good, but it must not stay invisible.
             news_blocked = is_news_blocking(instrument)
             news_status = get_news_status(instrument)
+            news_armed = bool(news_status.get("news_filter_armed"))
+            if not news_armed:
+                self._log_news_gate_inert(instrument, news_status)
             news_reason = "OK" if not news_blocked else news_status.get("block_reason", "News bloquante")
             if news_blocked:
                 blocking_reasons.append(news_reason)
@@ -596,6 +626,7 @@ class IctRiskManager:
                 self._consecutive_losses = 0
                 self._last_trade_was_loss = False
                 self._current_position_size_multiplier = 1.0  # Reset multiplier after win
+
             elif pnl < 0:
                 result = "loss"
                 self._consecutive_losses += 1

@@ -381,6 +381,28 @@ class NewsFilter:
         
         return sorted(upcoming, key=lambda e: e.datetime_utc)
     
+    def is_armed(self) -> tuple[bool, str]:
+        """Whether the filter can actually block a trade, and why not if it cannot.
+
+        There is no economic-calendar source in this codebase. The only producer
+        is _generate_mock_calendar(), and is_trading_blocked() deliberately skips
+        events with source == "mock" so that approximate dates cannot stop real
+        trading. That is the right call, and it has a consequence that was not
+        surfaced anywhere: with an empty calendar the filter never blocks, so the
+        §"filtre economique" gate has been reporting a check it cannot perform.
+
+        Wiring the mock in would not arm it, and would look like it had. Callers
+        are expected to show this state rather than assume protection.
+        """
+        if not self._events_cache:
+            self._load_cache()
+        real = [e for e in self._events_cache if e.source != "mock"]
+        if real:
+            return True, f"{len(real)} real event(s) loaded"
+        if self._events_cache:
+            return False, "only simulated events available; they never block by design"
+        return False, "no economic calendar source is configured"
+
     def get_event_status(
         self,
         instrument: Instrument,
@@ -390,11 +412,17 @@ class NewsFilter:
         check_time = check_time or datetime.now(timezone.utc)
         blocked, reason, event = self.is_trading_blocked(instrument, check_time)
         upcoming = self.get_upcoming_events(instrument, hours_ahead=24, check_time=check_time)
-        
+        armed, armed_reason = self.is_armed()
+
         return {
             "instrument": instrument,
             "check_time_utc": check_time.isoformat(),
             "news_filter_enabled": self.configs.get(instrument, NewsFilterConfig()).enabled,
+            # False here means the filter cannot block anything, not that trading
+            # is currently clear of news. Keeping the two apart is the point.
+            "news_filter_armed": armed,
+            "news_filter_armed_reason": armed_reason,
+            "news_protection_active": armed and not blocked,
             "trading_blocked": blocked,
             "block_reason": reason,
             "blocking_event": {

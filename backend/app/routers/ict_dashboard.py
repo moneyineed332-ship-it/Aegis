@@ -259,6 +259,21 @@ async def get_risk_status(instrument: Instrument = Query("EURUSD")) -> RiskStatu
     return rm.check_all_limits(instrument, 0.0, 0.0, 0.0)
 
 
+@router.get("/news-status")
+async def get_news_status(instrument: Instrument = Query("EURUSD")) -> dict:
+    """Whether the economic-news gate can actually block a trade.
+
+    Exposed on its own because the gate's honest answer is "no" today, and an
+    operator reading a risk screen that lists eleven checks has no way to tell
+    which of them are real. The filter has no economic-calendar source: the only
+    producer is simulated data whose events are skipped on purpose, so it never
+    blocks and the risk around high-impact news is unmanaged.
+    """
+    from ..news_filter import get_news_status as _news_status
+
+    return _news_status(instrument)
+
+
 # ============================================================
 # TRADE JOURNAL ENDPOINTS
 # ============================================================
