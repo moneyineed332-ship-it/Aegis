@@ -50,24 +50,30 @@ Engine state lives in SQLite on a Fly volume. With more than one machine, each
 keeps its own in-memory copy and they overwrite each other. Deploy a single
 machine, or move the engine state behind a shared store.
 
-## 3. The optimiser selects on in-sample data
+## 3. The Sharpe scale makes the ranking weak
 
-`optimizer.py` scores every candidate on the same candles and returns the best
-one. There is no train/test split and no out-of-sample step.
+`optimizer.py` now scores the grid on a training window, carries the single
+top-ranked candidate across an embargo to a held-out window, and reports what
+happened there (`verdict`, `out_of_sample_metrics`, `sharpe_drift`).
 
-Measured on 1 988 real EURUSD 15m candles, 28 parameter sets, ranking done on a
-first two thirds and evaluated on the last third:
+The protocol is not the weak part. The score is: every candidate is ranked by a
+Sharpe annualised on a 15m or 1h series, multiplied by 187 and 94
+respectively, which is why values cluster near -50. Ranking on that number is
+ranking mostly on noise, and the held-out result inherits it.
+
+Measured on 1 988 real EURUSD 15m candles, 28 parameter sets, ranking on two
+thirds and reporting the last third:
 
     best on training   -41.70  ->  -56.24 out-of-sample   (35 % degradation)
     grid median        -54.76  ->  -58.38
 
-The training winner is only marginally ahead of picking a parameter set at
-random, so its apparent edge is mostly noise. A further warning: the score is
-an annualised Sharpe computed on a 15-minute series, multiplied by a factor of
-187, which is why values land around -50. Ranking on that number is ranking on
-noise. Use the walk-forward helpers in `backtesting.py` and
-`backtesting_advanced.py` instead of `optimize_*`, and treat any recommendation
-as a hypothesis.
+The training winner sat barely ahead of a parameter set drawn at random. On a
+second series the drift was larger still: Sharpe 11.19 in training, 3.53
+held out, a fall of 68 %.
+
+Until the Sharpe scale is settled, treat `verdict: held_up` as "not refuted"
+rather than "demonstrated", and do not read the composite ranking as a
+performance estimate.
 
 ## 4. No strategy currently qualifies on out-of-sample evidence
 
@@ -115,6 +121,7 @@ each with a test pinning it:
 | Admin token never in a URL | `deps.issue_ws_ticket` |
 | Financial reads require the token | `test_route_auth_inventory` |
 | No paper candidate without held-out evidence | `lab.promotion_decision` |
+| Optimiser candidates measured out of sample | `optimizer._search` |
 | Take-profit at the nearest liquidity pool | `ict_signal_generator._nearest_liquidity_target` |
 | Modes B, C and D selectable | `ict_dashboard.set_position_mode` |
 | `can_trade` reflects a real check | `IctRiskManager.check_account_limits` |
