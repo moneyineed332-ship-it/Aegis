@@ -30,14 +30,28 @@ The training winner sat barely ahead of a parameter set drawn at random, so its
 apparent edge was mostly noise. Reporting that is the point: the previous
 behaviour reported the training number alone and it read as a result.
 
-Selection quality also depends on the score being meaningful, which is not yet
-settled: every candidate is ranked by a Sharpe annualised on a 15m or 1h series
-(multiplied by 187 and 94 respectively), which is why values cluster near -50.
-The Sharpe scale is tracked separately; ranking is unchanged here so the
-validation can be measured on its own.
+Selection quality is a separate matter from this protocol, and it was measured
+separately. A follow-up check looked for the suspicion that ranking on an
+annualised Sharpe was itself the problem, on the theory that a 15m series
+multiplies by 187 and a 1h series by 94, so the numbers cluster near -50 and are
+mostly noise. That theory is wrong: every candidate in a run shares one
+`interval`, so the annualisation factor is a constant multiplier and cancels out
+of the ranking. The top five of a 28-set grid came out in the same order
+annualised and not, and the same strategy on the same candles gives an identical
+per-period Sharpe of -0.22637 at both 15m and 1h, with the annual figures
+differing by exactly the ratio of the square roots.
+
+The annualised figure is a real annual Sharpe and the promotion thresholds in
+lab.py compare annual to annual, so nothing needed rescaling. What the extreme
+magnitudes did cause was unreadable output: a bare "-41.70" gives no hint that
+it is an annual number, or what the per-period value underneath it is. Results
+now carry `sharpe_per_period` and `annualisation_factor` so the scale is
+explicit, and the i.i.d. assumption behind the annualisation is stated where the
+number is produced.
 """
 
 from itertools import product
+import math
 
 # Share of history held back from the grid search.
 DEFAULT_TEST_FRACTION = 0.30
@@ -99,7 +113,8 @@ def _row(label: dict, params: dict, metrics: dict) -> dict:
 
 
 def _search(candles, capital, candidates, build_params, run, label, strategy_type,
-            test_fraction=DEFAULT_TEST_FRACTION, embargo=DEFAULT_EMBARGO_CANDLES):
+            test_fraction=DEFAULT_TEST_FRACTION, embargo=DEFAULT_EMBARGO_CANDLES,
+            interval="1h"):
     """Score a grid on a training window, then carry the winner to a held-out one."""
     split = _split_for_validation(candles, test_fraction, embargo)
     train, test = split if split else (candles, None)
@@ -144,14 +159,15 @@ def _search(candles, capital, candidates, build_params, run, label, strategy_typ
             "total_return": best["return"],
             "max_drawdown": best["drawdown"],
             "trade_count": best["trades"],
+            **_sharpe_scale(best["sharpe"], interval),
         },
-        "out_of_sample_metrics": _oos_summary(oos, best) if oos is not None else None,
+        "out_of_sample_metrics": _oos_summary(oos, best, interval) if oos is not None else None,
         "recommendation": _generate_recommendation(best, strategy_type, oos, verdict),
     }
     return out
 
 
-def _oos_summary(oos: dict, best: dict) -> dict:
+def _oos_summary(oos: dict, best: dict, interval: str) -> dict:
     """Held-out metrics, plus the drift from what the grid scored."""
     summary = {
         "sharpe_ratio": oos["sharpe_ratio"],
@@ -161,15 +177,40 @@ def _oos_summary(oos: dict, best: dict) -> dict:
         "max_drawdown": oos["max_drawdown"],
         "trade_count": oos["trade_count"],
     }
+    summary.update(_sharpe_scale(oos.get("sharpe_ratio", 0), interval))
     train_sharpe = best["sharpe"]
     if train_sharpe:
         summary["sharpe_drift"] = round(oos["sharpe_ratio"] - train_sharpe, 4)
     return summary
 
 
+def _sharpe_scale(sharpe: float, interval: str) -> dict:
+    """State the scale an annualised Sharpe was computed on.
+
+    A bare -41.70 reads like a broken backtester. It is an annual figure; the
+    per-period value underneath is -0.2264 on 15m, and only the second is
+    comparable to a per-bar edge. The factor is a constant multiplier within a
+    run and cancels out of the ranking, so this is reported for reading only.
+    """
+    from .metrics_core import PERIODS_PER_YEAR
+
+    # periods_per_year() falls back to hourly for an unrecognised interval, which
+    # would report a confident-looking scale for the wrong timeframe. Check the
+    # map directly so an unknown interval reports no scale instead of a wrong one.
+    if interval not in PERIODS_PER_YEAR:
+        return {}
+    factor = math.sqrt(PERIODS_PER_YEAR[interval])
+    return {
+        "sharpe_per_period": round(sharpe / factor, 6),
+        "annualisation_factor": round(factor, 4),
+        "sharpe_interval": interval,
+    }
+
+
 def optimize_sma(candles: list[dict], capital: float = 10_000, *,
                  test_fraction: float = DEFAULT_TEST_FRACTION,
-                 embargo: int = DEFAULT_EMBARGO_CANDLES) -> dict:
+                 embargo: int = DEFAULT_EMBARGO_CANDLES,
+                 interval: str = "1h") -> dict:
     """Grid search optimization for SMA crossover parameters, validated out-of-sample."""
     from .backtesting import run_sma_crossover
 
@@ -177,7 +218,7 @@ def optimize_sma(candles: list[dict], capital: float = 10_000, *,
         fast, slow = values
         return {
             "fast_period": fast, "slow_period": slow, "initial_capital": cap,
-            "allocation": 0.95, "fee_bps": 10, "slippage_bps": 5, "interval": "1h",
+            "allocation": 0.95, "fee_bps": 10, "slippage_bps": 5, "interval": interval,
         }
 
     def label(values):
@@ -189,12 +230,13 @@ def optimize_sma(candles: list[dict], capital: float = 10_000, *,
         if fast < slow
     ]
     return _search(candles, capital, candidates, build, run_sma_crossover, label,
-                   "sma", test_fraction, embargo)
+                   "sma", test_fraction, embargo, interval)
 
 
 def optimize_donchian(candles: list[dict], capital: float = 10_000, *,
                       test_fraction: float = DEFAULT_TEST_FRACTION,
-                      embargo: int = DEFAULT_EMBARGO_CANDLES) -> dict:
+                      embargo: int = DEFAULT_EMBARGO_CANDLES,
+                      interval: str = "1h") -> dict:
     """Grid search optimization for Donchian breakout parameters, validated out-of-sample."""
     from .backtesting import run_donchian_breakout
 
@@ -202,8 +244,8 @@ def optimize_donchian(candles: list[dict], capital: float = 10_000, *,
         breakout, exit_p = values
         return {
             "breakout_period": breakout, "exit_period": exit_p, "initial_capital": cap,
-            "allocation": 0.95, "fee_bps": 10, "slippage_bps": 5, "interval": "1h",
-            "min_volatility": 0.01,
+            "allocation": 0.95, "fee_bps": 10, "slippage_bps": 5, "interval": interval,
+            "min_volatility": 0.01, "min_volatility": 0.01,
         }
 
     def label(values):
@@ -215,12 +257,13 @@ def optimize_donchian(candles: list[dict], capital: float = 10_000, *,
         if exit_p < breakout
     ]
     return _search(candles, capital, candidates, build, run_donchian_breakout, label,
-                   "donchian", test_fraction, embargo)
+                   "donchian", test_fraction, embargo, interval)
 
 
 def optimize_mean_reversion(candles: list[dict], capital: float = 10_000, *,
                             test_fraction: float = DEFAULT_TEST_FRACTION,
-                            embargo: int = DEFAULT_EMBARGO_CANDLES) -> dict:
+                            embargo: int = DEFAULT_EMBARGO_CANDLES,
+                            interval: str = "1h") -> dict:
     """Grid search optimization for Mean Reversion parameters, validated out-of-sample."""
     from .mean_reversion import run_mean_reversion
 
@@ -229,7 +272,7 @@ def optimize_mean_reversion(candles: list[dict], capital: float = 10_000, *,
         return {
             "period": period, "entry_z_score": entry, "exit_z_score": exit_z,
             "initial_capital": cap, "allocation": 0.95, "fee_bps": 10,
-            "slippage_bps": 5, "interval": "1h",
+            "slippage_bps": 5, "interval": interval,
         }
 
     def label(values):
@@ -237,12 +280,13 @@ def optimize_mean_reversion(candles: list[dict], capital: float = 10_000, *,
 
     candidates = list(product([-1.5, -2.0, -2.5, -3.0], [-0.5, 0.0, 0.5], [15, 20, 25, 30]))
     return _search(candles, capital, candidates, build, run_mean_reversion, label,
-                   "mean_reversion", test_fraction, embargo)
+                   "mean_reversion", test_fraction, embargo, interval)
 
 
 def optimize_grid(candles: list[dict], capital: float = 10_000, *,
                   test_fraction: float = DEFAULT_TEST_FRACTION,
-                  embargo: int = DEFAULT_EMBARGO_CANDLES) -> dict:
+                  embargo: int = DEFAULT_EMBARGO_CANDLES,
+                  interval: str = "1h") -> dict:
     """Grid search optimization for Grid trading parameters, validated out-of-sample."""
     from .grid import run_grid
 
@@ -250,7 +294,7 @@ def optimize_grid(candles: list[dict], capital: float = 10_000, *,
         count, spread = values
         return {
             "grid_count": count, "grid_spread_pct": spread, "initial_capital": cap,
-            "allocation": 0.95, "fee_bps": 10, "slippage_bps": 5, "interval": "1h",
+            "allocation": 0.95, "fee_bps": 10, "slippage_bps": 5, "interval": interval,
         }
 
     def label(values):
@@ -258,7 +302,7 @@ def optimize_grid(candles: list[dict], capital: float = 10_000, *,
 
     candidates = list(product([5, 8, 10, 12, 15, 20], [0.005, 0.01, 0.015, 0.02, 0.025, 0.03]))
     return _search(candles, capital, candidates, build, run_grid, label,
-                   "grid", test_fraction, embargo)
+                   "grid", test_fraction, embargo, interval)
 
 
 def _generate_recommendation(best: dict, strategy_type: str, oos: dict | None,

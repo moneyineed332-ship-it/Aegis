@@ -88,6 +88,17 @@ def sharpe_ratio(returns: list[float], ppy: int, risk_free: float = 0.0) -> floa
     Computed on the per-period series and annualized once, by sqrt(ppy). The
     old Monte-Carlo variant annualized each single trade return, which
     inflated the result by roughly sqrt(365).
+
+    The annualization assumes the per-period returns are independent and
+    identically distributed. With a handful of trades on a short window that
+    assumption does not hold, and the annual figure drifts upward. It is still
+    a consistent scale across intervals, which is what the promotion thresholds
+    in lab.py rely on, so it is left as the reported value; callers that need to
+    read it per bar should divide by sqrt(ppy) (see optimizer._sharpe_scale).
+
+    Note this factor cancels out of any ranking where every candidate shares one
+    interval: it is a constant multiplier. It changes the size of the numbers,
+    never their order.
     """
     if len(returns) < 2:
         return 0.0

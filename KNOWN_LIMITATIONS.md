@@ -50,30 +50,41 @@ Engine state lives in SQLite on a Fly volume. With more than one machine, each
 keeps its own in-memory copy and they overwrite each other. Deploy a single
 machine, or move the engine state behind a shared store.
 
-## 3. The Sharpe scale makes the ranking weak
+## 3. Sharpe figures need their scale read alongside them
 
 `optimizer.py` now scores the grid on a training window, carries the single
 top-ranked candidate across an embargo to a held-out window, and reports what
 happened there (`verdict`, `out_of_sample_metrics`, `sharpe_drift`).
 
-The protocol is not the weak part. The score is: every candidate is ranked by a
-Sharpe annualised on a 15m or 1h series, multiplied by 187 and 94
-respectively, which is why values cluster near -50. Ranking on that number is
-ranking mostly on noise, and the held-out result inherits it.
+The annualised Sharpe was briefly suspected of being itself a defect: a 15m
+series multiplies by 187 and a 1h series by 94, so values cluster near -50 and
+looked like noise. That suspicion was wrong and has been retracted. Every
+candidate in a run shares one `interval`, so `sqrt(ppy)` is a constant
+multiplier and cancels out of the ranking. Over a 28-set grid the top five came
+out in the same order annualised and per-period, and the same strategy on the
+same candles gives an identical per-period Sharpe of `-0.22637` at both 15m and
+1h, with the annual figures differing by exactly the ratio of the square roots.
+The promotion thresholds in `lab.py` compare annual to annual, so nothing
+needed rescaling and the ranking is unchanged.
 
-Measured on 1 988 real EURUSD 15m candles, 28 parameter sets, ranking on two
-thirds and reporting the last third:
+What the extreme magnitudes did cause was unreadable output. A bare `-41.70`
+gives no hint that it is an annual figure, so results now carry
+`sharpe_per_period`, `annualisation_factor` and `sharpe_interval`. Two caveats
+remain worth reading:
 
-    best on training   -41.70  ->  -56.24 out-of-sample   (35 % degradation)
-    grid median        -54.76  ->  -58.38
+- The annualisation assumes independent, identically distributed per-period
+  returns. With a few dozen trades that assumption does not hold and the annual
+  figure drifts upward. It is left as the reported value because it is the
+  consistent scale across intervals.
+- The extreme magnitudes are not a measurement artefact. They say the tested
+  strategies have no edge after costs: per-period Sharpe around `-0.22`, which
+  annualises to the `-40` range on 15m. The held-out degradation found
+  earlier (Sharpe `11.19` in training to `3.53` out of sample, a fall of 68 %)
+  is selection variance, which the out-of-sample protocol addresses, not a
+  scaling problem.
 
-The training winner sat barely ahead of a parameter set drawn at random. On a
-second series the drift was larger still: Sharpe 11.19 in training, 3.53
-held out, a fall of 68 %.
-
-Until the Sharpe scale is settled, treat `verdict: held_up` as "not refuted"
-rather than "demonstrated", and do not read the composite ranking as a
-performance estimate.
+Until a strategy clears those thresholds, `verdict: held_up` should be read as
+"not refuted" rather than "demonstrated".
 
 ## 4. No strategy currently qualifies on out-of-sample evidence
 
@@ -123,6 +134,7 @@ each with a test pinning it:
 | No paper candidate without held-out evidence | `lab.promotion_decision` |
 | Optimiser candidates measured out of sample | `optimizer._search` |
 | Tasks run on the first tick after a restart | `scheduler._loop` |
+| Sharpe reported with the scale it was computed on | `optimizer._sharpe_scale` |
 | Take-profit at the nearest liquidity pool | `ict_signal_generator._nearest_liquidity_target` |
 | Modes B, C and D selectable | `ict_dashboard.set_position_mode` |
 | `can_trade` reflects a real check | `IctRiskManager.check_account_limits` |

@@ -677,7 +677,7 @@ def optimize_sma_strategy(
     quality = data_quality.validate_ohlcv(candles, interval)
     if not quality["valid"]:
         raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    result = optimizer.optimize_sma(candles, INITIAL_CAPITAL)
+    result = optimizer.optimize_sma(candles, INITIAL_CAPITAL, interval=interval)
     result["symbol"] = symbol
     result["interval"] = interval
     return result
@@ -693,7 +693,7 @@ def optimize_donchian_strategy(
     quality = data_quality.validate_ohlcv(candles, interval)
     if not quality["valid"]:
         raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    result = optimizer.optimize_donchian(candles, INITIAL_CAPITAL)
+    result = optimizer.optimize_donchian(candles, INITIAL_CAPITAL, interval=interval)
     result["symbol"] = symbol
     result["interval"] = interval
     return result
@@ -709,7 +709,7 @@ def optimize_mean_reversion_strategy(
     quality = data_quality.validate_ohlcv(candles, interval)
     if not quality["valid"]:
         raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    result = optimizer.optimize_mean_reversion(candles, INITIAL_CAPITAL)
+    result = optimizer.optimize_mean_reversion(candles, INITIAL_CAPITAL, interval=interval)
     result["symbol"] = symbol
     result["interval"] = interval
     return result
@@ -725,7 +725,7 @@ def optimize_grid_strategy(
     quality = data_quality.validate_ohlcv(candles, interval)
     if not quality["valid"]:
         raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    result = optimizer.optimize_grid(candles, INITIAL_CAPITAL)
+    result = optimizer.optimize_grid(candles, INITIAL_CAPITAL, interval=interval)
     result["symbol"] = symbol
     result["interval"] = interval
     return result
@@ -742,10 +742,10 @@ def compare_all_strategies(
     if not quality["valid"]:
         raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
     results = {
-        "sma_crossover": optimizer.optimize_sma(candles, INITIAL_CAPITAL),
-        "donchian_breakout": optimizer.optimize_donchian(candles, INITIAL_CAPITAL),
-        "mean_reversion": optimizer.optimize_mean_reversion(candles, INITIAL_CAPITAL),
-        "grid": optimizer.optimize_grid(candles, INITIAL_CAPITAL),
+        "sma_crossover": optimizer.optimize_sma(candles, INITIAL_CAPITAL, interval=interval),
+        "donchian_breakout": optimizer.optimize_donchian(candles, INITIAL_CAPITAL, interval=interval),
+        "mean_reversion": optimizer.optimize_mean_reversion(candles, INITIAL_CAPITAL, interval=interval),
+        "grid": optimizer.optimize_grid(candles, INITIAL_CAPITAL, interval=interval),
     }
     comparison = optimizer.compare_strategies(results)
     comparison["symbol"] = symbol
