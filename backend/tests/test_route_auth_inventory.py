@@ -67,8 +67,11 @@ PUBLIC_PATHS = {
     "/api/v1/binance/testnet/price",
 }
 # NOTE: /docs, /redoc and /openapi.json are FastAPI built-ins, not APIRoute
-# instances, so they are outside this inventory. They remain publicly reachable
-# and are a separate finding (they publish the full endpoint map).
+# instances, so they stay outside this inventory either way. They used to be
+# served without a token, which published the full endpoint map including every
+# admin route. They are now absent unless AEGIS_EXPOSE_API_DOCS is set, pinned by
+# test_api_docs_are_off_by_default.py. This inventory cannot see them, so that
+# file is the only thing standing between them and the public.
 
 # Endpoints that are neither financial nor plain market data, listed explicitly
 # so an accidental protection is caught too.

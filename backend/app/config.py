@@ -29,6 +29,11 @@ def _decrypt_env(value: str) -> str:
 
 # --- Mode ---
 MODE = os.getenv("AEGIS_MODE", "paper")  # "paper" | "live"
+# /docs, /redoc and /openapi.json describe every endpoint including the admin
+# ones, so they are not served unless asked for. Off by default: the schema can
+# be written to a file instead (see app/export_openapi.py), which needs no public
+# route and is how the API contract should be consumed in CI.
+EXPOSE_API_DOCS = os.getenv("AEGIS_EXPOSE_API_DOCS", "false").lower() in ("1", "true", "yes", "on")
 ADMIN_TOKEN = _decrypt_env(os.getenv("AEGIS_ADMIN_TOKEN", ""))
 # Both loopback spellings are listed because Vite prints the 127.0.0.1 URL, so
 # following the link it displays produced a bare 400 from CORSMiddleware and an

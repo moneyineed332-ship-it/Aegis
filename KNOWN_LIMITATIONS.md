@@ -135,6 +135,7 @@ each with a test pinning it:
 | Optimiser candidates measured out of sample | `optimizer._search` |
 | Tasks run on the first tick after a restart | `scheduler._loop` |
 | Sharpe reported with the scale it was computed on | `optimizer._sharpe_scale` |
+| API docs and schema not served publicly | `config.EXPOSE_API_DOCS` |
 | Take-profit at the nearest liquidity pool | `ict_signal_generator._nearest_liquidity_target` |
 | Modes B, C and D selectable | `ict_dashboard.set_position_mode` |
 | `can_trade` reflects a real check | `IctRiskManager.check_account_limits` |

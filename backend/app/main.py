@@ -66,7 +66,19 @@ async def lifespan(app: FastAPI):
     logger.info("AEGIS AI Quant shut down")
 
 
-app = FastAPI(title="AEGIS AI Quant", version="0.2.0", lifespan=lifespan)
+_EXPOSE_API_DOCS = config.EXPOSE_API_DOCS
+app = FastAPI(
+    title="AEGIS AI Quant",
+    version="0.2.0",
+    lifespan=lifespan,
+    # These three publish the full endpoint map, admin routes included, and the
+    # schemas behind them. They were reachable without a token, which made the
+    # admin surface enumerable by anyone who found the host. Disabled by
+    # default; AEGIS_EXPOSE_API_DOCS=1 turns them back on for local work.
+    docs_url="/docs" if _EXPOSE_API_DOCS else None,
+    redoc_url="/redoc" if _EXPOSE_API_DOCS else None,
+    openapi_url="/openapi.json" if _EXPOSE_API_DOCS else None,
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
