@@ -122,6 +122,7 @@ each with a test pinning it:
 | Financial reads require the token | `test_route_auth_inventory` |
 | No paper candidate without held-out evidence | `lab.promotion_decision` |
 | Optimiser candidates measured out of sample | `optimizer._search` |
+| Tasks run on the first tick after a restart | `scheduler._loop` |
 | Take-profit at the nearest liquidity pool | `ict_signal_generator._nearest_liquidity_target` |
 | Modes B, C and D selectable | `ict_dashboard.set_position_mode` |
 | `can_trade` reflects a real check | `IctRiskManager.check_account_limits` |

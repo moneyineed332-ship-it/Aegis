@@ -17,7 +17,16 @@ class ScheduledTask:
     name: str
     func: callable
     interval: float  # seconds
-    last_run: float = 0.0
+    # None means "never run", and _loop treats that as due immediately.
+    #
+    # This was 0.0, which is wrong for a monotonic clock. time.monotonic() on
+    # Windows is milliseconds since boot, not seconds since the epoch, so 0.0 is
+    # not "infinitely long ago" but "at boot". A task registered with a 3600 s
+    # interval was therefore not due on the first tick until the machine had been
+    # up for an hour: `learning` sat idle for up to ENGINE_INTERVAL_OPTIMIZE
+    # seconds after every restart, and the delay was longest on a freshly booted
+    # machine, which is exactly what a deploy produces.
+    last_run: float | None = None
     task: asyncio.Task | None = None
     enabled: bool = True
     running: bool = False
@@ -116,7 +125,7 @@ class Scheduler:
                     continue
                 if task.running:
                     continue
-                if now - task.last_run >= task.interval:
+                if task.last_run is None or now - task.last_run >= task.interval:
                     dispatched.append(task)
             if dispatched:
                 # One cycle per tick that actually did work. The cycle id is what
@@ -173,7 +182,9 @@ class Scheduler:
         task = self._tasks.get(name)
         if not task or task.running:
             return False
-        task.last_run = 0  # Force immediate execution
+        # Reset to "never run" rather than to 0, which on a monotonic clock means
+        # "at boot" and would leave a long-interval task not due yet.
+        task.last_run = None  # Force immediate execution
         return True
 
 
