@@ -105,12 +105,51 @@ it promotes nothing, because nothing in the store clears the thresholds out of
 sample. That is the real state of the research, and it is unchanged by the fix:
 no strategy has demonstrated a paper-worthy edge.
 
-## 5. Prometheus path cardinality
+## 5. Unauthenticated memory growth in the metrics registry
 
-`/metrics` exposes raw path labels, so cardinality grows with distinct URLs.
-The scrape target is on a 10 second interval, and 10s on a single machine is
-affordable, but the label set still needs templating before more instances
-exist. Not re-verified since the initial audit.
+**Accepted risk, not fixed.** The previous text here was wrong about why, so the
+correction matters more than the item.
+
+`metrics_middleware` in `main.py` labels `request.url.path` for every request
+whose path starts with `/api/`, including requests that match no route. The
+registry behind it is a plain dict in `app/metrics.py` with no cap and no
+eviction, so **each distinct path is permanent**:
+
+- 1 series for `http_requests_total`, multiplied by `status` (200, 401, 404,
+  422, 429 each get their own)
+- 14 series for `http_request_duration_seconds`: 11 buckets, `+Inf`, `_count`
+  and `_sum`
+
+That is roughly 1-2 KB per distinct path, and `render()` walks the whole
+registry on every scrape.
+
+The earlier version of this note blamed the 10 second scrape interval, and that
+was wrong. The interval has nothing to do with it: scraping every 10 s costs the
+same as scraping every 60 s. What costs is serialising a registry that has
+grown, which is a function of its size, not of how often it is read.
+
+**Why it is not urgent.** The application does not invent paths. Its roughly
+175 routes are fixed, so absent anyone deliberately feeding it, the registry is
+bounded at a few MB and stays there. Trading is not affected either way.
+
+**What accepting it means.** Fly hands out publicly reachable `*.fly.dev`
+hostnames, and any request to `/api/<anything>` returns a cheap 404 **with no
+token check**, while permanently adding a label set. Growth is therefore an
+unauthenticated, unbounded memory increase, with a restart as the only remedy
+once under way. The failure is gradual: rising RSS, then slower `/metrics`
+scrapes, then an OOM kill from Fly. It is not a trading fault, and nothing about
+it is exercised by the test suite today.
+
+**Revisit if** process RSS climbs without plateauing, if `/metrics` scrape
+latency rises, if the machine is OOM-killed, or when moving beyond a single
+instance, where each machine holds its own registry and both the memory and the
+serialisation cost multiply.
+
+**Cheapest mitigations, neither applied.** Resolving each path to its route
+template before labelling would drop the label set to about 175 entries, at the
+cost of ignoring genuinely unmatched requests. A hard cap on distinct paths,
+above which new ones are not labelled, bounds the growth in half a dozen lines
+and keeps scraping healthy without changing what the existing routes report.
 
 ---
 
