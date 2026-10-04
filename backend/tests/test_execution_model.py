@@ -121,6 +121,16 @@ def _trending(n=220, base=100.0, step=0.002):
     return _bars([base * (1 + step) ** i for i in range(n)], spread=base * 0.004)
 
 
+def _check(trades: list[dict]) -> None:
+    for trade in trades:
+        assert "signal_index" in trade, "trade is missing its signal bar"
+        assert "fill_index" in trade, "trade is missing its fill bar"
+        assert trade["fill_index"] > trade["signal_index"], (
+            f"look-ahead: signal on bar {trade['signal_index']} "
+            f"filled on bar {trade['fill_index']}"
+        )
+
+
 class TestBacktestersRespectTheInvariant:
     """The invariant is enforced inside each run; these tests also read the
     trade list back so it is verified from outside, not just asserted."""

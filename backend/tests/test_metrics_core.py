@@ -170,7 +170,9 @@ class TestUnifiedAcrossBacktesters:
     """Every backtester must now return the same number for the same input."""
 
     def test_all_modules_delegate_to_metrics_core(self):
-        from app import backtesting, backtesting_smc, backtesting_advanced, indicators
+        # backtesting_advanced went out with the crypto strategies; monte carlo,
+        # sensitivity and walk-forward optimisation were its only content.
+        from app import backtesting, backtesting_smc, indicators
         from app.metrics_core import max_drawdown as core_dd
         from app.metrics_core import sortino_ratio as core_sortino
 
@@ -180,6 +182,5 @@ class TestUnifiedAcrossBacktesters:
         assert backtesting_smc.sharpe_ratio is sharpe_ratio
         assert backtesting_smc.sortino_ratio is core_sortino
         assert backtesting_smc.max_drawdown is core_dd
-        assert backtesting_advanced._sharpe([0.01, 0.02], 365) == sharpe_ratio([0.01, 0.02], 365)
         assert indicators.sortino_ratio([0.01, -0.02], 365) == core_sortino([0.01, -0.02], 365)
         assert indicators.periods_per_year("4h") == periods_per_year("4h")

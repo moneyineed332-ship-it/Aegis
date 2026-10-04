@@ -146,7 +146,7 @@ def test_ohlcv(admin_headers):
 
 
 def test_refresh_ohlcv(admin_headers):
-    r = client.post("/api/v1/ohlcv/refresh", params={"symbol": "BTCUSDT", "interval": "1h", "limit": 100}, headers=admin_headers)
+    r = client.post("/api/v1/ohlcv/refresh", params={"symbol": "EURUSD", "interval": "1h", "limit": 100}, headers=admin_headers)
     assert r.status_code == 201
     data = r.json()
     assert "stored" in data
@@ -341,36 +341,6 @@ def test_donchian_walk_forward(admin_headers):
     assert r.status_code in (200, 201, 400, 404, 422)
 
 
-# === Backtests Mean Reversion ===
-
-def test_mean_reversion_backtest(admin_headers):
-    r = client.post("/api/v1/backtests/mean-reversion", headers=admin_headers, json={
-        "symbol": "BTCUSDT",
-        "interval": "1h",
-    })
-    assert r.status_code in (200, 201, 400, 422)
-
-
-def test_mean_reversion_walk_forward(admin_headers):
-    r = client.post("/api/v1/backtests/mean-reversion/walk-forward", headers=admin_headers)
-    assert r.status_code in (200, 201, 400, 404, 422)
-
-
-# === Backtests Grid ===
-
-def test_grid_backtest(admin_headers):
-    r = client.post("/api/v1/backtests/grid", headers=admin_headers, json={
-        "symbol": "BTCUSDT",
-        "interval": "1h",
-    })
-    assert r.status_code in (200, 201, 400, 422)
-
-
-def test_grid_walk_forward(admin_headers):
-    r = client.post("/api/v1/backtests/grid/walk-forward", headers=admin_headers)
-    assert r.status_code in (200, 201, 400, 404, 422)
-
-
 # === Backtests SMC/ICT ===
 
 def test_smc_ict_backtest(admin_headers):
@@ -412,13 +382,13 @@ def test_market_order(admin_headers):
 def test_limit_order(admin_headers):
     # Was: quantity 0.0001 at 50000 = 5 EUR, below ORDER_MIN_NOTIONAL (10), and
     # the assertion accepted 401, so the unauthenticated rejection satisfied it
-    # and the endpoint was never exercised. Now a valid size, and the assertion
-    # is exact.
+    # and the endpoint was never exercised. Now a valid Forex size: 20 000 units
+    # at 1.10 = 22 EUR, clear of the floor and under the notional cap.
     r = client.post("/api/v1/execution/limit-order", params={
-        "symbol": "BTCUSDT",
+        "symbol": "EURUSD",
         "side": "buy",
-        "quantity": 0.0002,
-        "limit_price": 50000,
+        "quantity": 20,
+        "limit_price": 1.10,
     }, headers=admin_headers)
     assert r.status_code == 201
 
@@ -452,16 +422,6 @@ def test_optimize_donchian(admin_headers):
     assert r.status_code in (200, 422)
 
 
-def test_optimize_mean_reversion(admin_headers):
-    r = client.post("/api/v1/optimizer/mean-reversion", headers=admin_headers)
-    assert r.status_code in (200, 422)
-
-
-def test_optimize_grid(admin_headers):
-    r = client.post("/api/v1/optimizer/grid", headers=admin_headers)
-    assert r.status_code in (200, 422)
-
-
 def test_compare_strategies(admin_headers):
     r = client.post("/api/v1/optimizer/compare", headers=admin_headers)
     assert r.status_code in (200, 422)
@@ -485,23 +445,6 @@ def test_alert_thresholds(admin_headers):
 def test_check_alerts(admin_headers):
     r = client.post("/api/v1/alerts/check", headers=admin_headers)
     assert r.status_code == 200
-
-
-# === Phase 4: Advanced Backtesting ===
-
-def test_advanced_walk_forward(admin_headers):
-    r = client.post("/api/v1/backtests/advanced/walk-forward", headers=admin_headers)
-    assert r.status_code in (200, 201, 422)
-
-
-def test_monte_carlo(admin_headers):
-    r = client.post("/api/v1/backtests/advanced/monte-carlo", headers=admin_headers)
-    assert r.status_code in (200, 201, 422)
-
-
-def test_sensitivity(admin_headers):
-    r = client.post("/api/v1/backtests/advanced/sensitivity", headers=admin_headers)
-    assert r.status_code in (200, 201, 422)
 
 
 # === Phase 4: ML Regime ===
@@ -626,18 +569,26 @@ def test_cancel_open_order(client, admin_headers):
 # neither the fill nor the pending order.
 
 ORDER_ENTRY_POINTS = [
-    ("/api/v1/execution/limit-order", {"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002, "limit_price": 50000}),
-    ("/api/v1/execution/market-order", {"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002}),
-    ("/api/v1/execution/fractioned-order", {"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002, "chunks": 2}),
-    ("/api/v1/paper-orders", {"symbol": "BTC/USDT", "side": "buy", "quantity": 0.0002, "reference_price": 50000}),
-    ("/api/v1/orders/manual", {"symbol": "BTC/USDT", "side": "buy", "order_type": "market", "quantity": 0.0002}),
-    ("/api/v1/orders/manual", {"symbol": "BTC/USDT", "side": "buy", "order_type": "limit", "quantity": 0.0002, "limit_price": 50000}),
+    ("/api/v1/execution/limit-order", {"symbol": "EURUSD", "side": "buy", "quantity": 20, "limit_price": 1.10}),
+    ("/api/v1/execution/market-order", {"symbol": "EURUSD", "side": "buy", "quantity": 20}),
+    # fractioned-order caps quantity at 10 (Query le=10), so 10 units here, not
+    # 20: a larger value is rejected by validation before the kill switch is
+    # ever consulted, which would make the test pass for the wrong reason.
+    ("/api/v1/execution/fractioned-order", {"symbol": "EURUSD", "side": "buy", "quantity": 10, "chunks": 2}),
+    # paper-orders also caps quantity at 10 (PaperOrder le=10), for the same
+    # reason: a larger value is rejected by validation before the kill switch is
+    # consulted. 10 units at 1.10 = 11 EUR, still above ORDER_MIN_NOTIONAL.
+    ("/api/v1/paper-orders", {"symbol": "EURUSD", "side": "buy", "quantity": 10, "reference_price": 1.10}),
+    # ManualOrderRequest additionally requires a slashed symbol
+    # (pattern ^[A-Z0-9]+/[A-Z0-9]+$) and caps quantity at 10, so these two
+    # differ from the entries above on both fields.
+    ("/api/v1/orders/manual", {"symbol": "EUR/USD", "side": "buy", "order_type": "market", "quantity": 10}),
+    ("/api/v1/orders/manual", {"symbol": "EUR/USD", "side": "buy", "order_type": "limit", "quantity": 10, "limit_price": 1.10}),
 ]
 
 
 def test_kill_switch_blocks_every_order_endpoint(client, admin_headers):
-    storage.save_market_snapshots([{"symbol": "BTC/USDT", "price": 50000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
-    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 50000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    storage.save_market_snapshots([{"symbol": "EURUSD", "price": 1.10, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
     storage.set_kill_switch(True, "regression test")
     try:
         for path, payload in ORDER_ENTRY_POINTS:
@@ -648,12 +599,12 @@ def test_kill_switch_blocks_every_order_endpoint(client, admin_headers):
 
 
 def test_kill_switch_blocks_limit_order_specifically(client, admin_headers):
-    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 50000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    storage.save_market_snapshots([{"symbol": "EURUSD", "price": 1.10, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
     storage.set_kill_switch(True, "regression test")
     try:
         r = client.post(
             "/api/v1/execution/limit-order",
-            params={"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002, "limit_price": 40000},
+            params={"symbol": "EURUSD", "side": "buy", "quantity": 20, "limit_price": 1.05},
             headers=admin_headers,
         )
         assert r.status_code == 423
@@ -716,25 +667,25 @@ def test_fractioned_order_rejects_before_chunking(client, admin_headers):
 
 def test_limit_order_now_persists_a_fill(client, admin_headers):
     """The endpoint used to return a fill without recording anything."""
-    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 50000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    storage.save_market_snapshots([{"symbol": "EURUSD", "price": 1.10, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
     r = client.post(
         "/api/v1/execution/limit-order",
-        params={"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002, "limit_price": 60000},
+        params={"symbol": "EURUSD", "side": "buy", "quantity": 20, "limit_price": 1.15},
         headers=admin_headers,
     )
     assert r.status_code == 201
     assert r.json()["status"] == "filled"
     positions = storage.list_positions()
-    btc = next((p for p in positions if p["symbol"] == "BTCUSDT"), None)
-    assert btc is not None, "a filled limit order left no position"
-    assert btc["average_price"] == 60000
+    filled = next((p for p in positions if p["symbol"] == "EURUSD"), None)
+    assert filled is not None, "a filled limit order left no position"
+    assert filled["average_price"] == 1.15
 
 
 def test_limit_order_persists_a_pending_order(client, admin_headers):
-    storage.save_market_snapshots([{"symbol": "BTCUSDT", "price": 65000, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
+    storage.save_market_snapshots([{"symbol": "EURUSD", "price": 1.20, "source": "test", "collected_at": "2026-01-15T10:00:00Z"}])
     r = client.post(
         "/api/v1/execution/limit-order",
-        params={"symbol": "BTCUSDT", "side": "buy", "quantity": 0.0002, "limit_price": 50000},
+        params={"symbol": "EURUSD", "side": "buy", "quantity": 20, "limit_price": 1.10},
         headers=admin_headers,
     )
     assert r.status_code == 201
@@ -772,16 +723,11 @@ if False:  # Manual __main__ runner disabled — use pytest instead
         test_journal_analysis, test_journal_outcomes,
         test_sma_backtest, test_sma_walk_forward,
         test_donchian_walk_forward,
-        test_mean_reversion_backtest, test_mean_reversion_walk_forward,
-        test_grid_backtest, test_grid_walk_forward,
         test_smc_ict_backtest, test_multi_timeframe_backtest, test_multi_scale_crossover_backtest,
         test_market_order, test_limit_order, test_fractioned_order, test_estimate_slippage,
-        test_optimize_sma, test_optimize_donchian, test_optimize_mean_reversion, test_optimize_grid, test_compare_strategies,
+        test_optimize_sma, test_optimize_donchian, test_compare_strategies,
         test_alert_history, test_alert_thresholds, test_check_alerts,
-        test_advanced_walk_forward, test_monte_carlo, test_sensitivity,
         test_ml_regime_summary, test_ml_regime_predict,
-        test_binance_testnet_health, test_binance_testnet_status, test_binance_testnet_price,
-        test_asset_classes, test_supported_symbols, test_forex_rates, test_commodity_prices,
         test_create_pipeline, test_validate_backtest,
         test_close_position_not_found, test_close_position_has_position,
         test_manual_order_market, test_manual_order_limit, test_manual_order_limit_missing_price,
@@ -801,3 +747,5 @@ if False:  # Manual __main__ runner disabled — use pytest instead
             print(f"  FAIL: {test.__name__} — {e}")
     print(f"\n{'='*50}")
     print(f"Results: {passed} passed, {failed} failed, {passed+failed} total")
+
+
