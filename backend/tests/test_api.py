@@ -96,8 +96,6 @@ def test_protected_posts_require_auth(client):
     ):
         r = client.post(path)
         assert r.status_code == 401, path
-    r = client.get("/api/v1/free/all")
-    assert r.status_code == 401
 
 
 # === Admin token verification (used by the dashboard login screen) ===
@@ -518,49 +516,6 @@ def test_ml_regime_summary(admin_headers):
 def test_ml_regime_predict(admin_headers):
     r = client.get("/api/v1/ml/regime/predict", headers=admin_headers)
     assert r.status_code in (200, 422)
-
-
-# === Phase 4: Binance Testnet ===
-
-def test_binance_testnet_health(admin_headers):
-    r = client.get("/api/v1/binance/testnet/health", headers=admin_headers)
-    assert r.status_code == 200
-
-
-def test_binance_testnet_status(admin_headers):
-    r = client.get("/api/v1/binance/testnet/status", headers=admin_headers)
-    assert r.status_code == 200
-
-
-def test_binance_testnet_price(admin_headers):
-    r = client.get("/api/v1/binance/testnet/price?symbol=BTCUSDT", headers=admin_headers)
-    assert r.status_code == 200
-
-
-# === Phase 4: Multi-Asset ===
-
-def test_asset_classes(admin_headers):
-    r = client.get("/api/v1/assets/classes", headers=admin_headers)
-    assert r.status_code == 200
-    data = r.json()
-    assert "crypto" in data
-
-
-def test_supported_symbols(admin_headers):
-    r = client.get("/api/v1/assets/symbols", headers=admin_headers)
-    assert r.status_code == 200
-    assert isinstance(r.json(), list)
-
-
-def test_forex_rates(admin_headers):
-    r = client.get("/api/v1/assets/forex", headers=admin_headers)
-    assert r.status_code in (200, 422)
-
-
-def test_commodity_prices(admin_headers):
-    r = client.get("/api/v1/assets/commodities", headers=admin_headers)
-    assert r.status_code == 200
-    assert isinstance(r.json(), list)
 
 
 # === Deployment ===

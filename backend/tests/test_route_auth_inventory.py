@@ -31,40 +31,12 @@ PUBLIC_PATHS = {
     "/api/v1/funding-rates",
     "/api/v1/open-interest",
     "/api/v1/market-snapshots",
-    "/api/v1/assets/classes",
-    "/api/v1/assets/commodities",
-    "/api/v1/assets/forex",
-    "/api/v1/assets/ohlcv",
-    "/api/v1/assets/price",
-    "/api/v1/assets/symbols",
-    "/api/v1/assets/stock/{symbol}",
-    "/api/v1/free/all",
-    "/api/v1/free/blockstream",
-    "/api/v1/free/coingecko/gainers",
-    "/api/v1/free/coingecko/global",
-    "/api/v1/free/coingecko/losers",
-    "/api/v1/free/coingecko/trending",
-    "/api/v1/free/defillama/chains",
-    "/api/v1/free/defillama/protocols",
-    "/api/v1/free/defillama/tvl",
-    "/api/v1/free/defillama/yields",
-    "/api/v1/free/dexscreener/trending",
-    "/api/v1/free/fear-greed/historical",
-    "/api/v1/free/finnhub/candle",
-    "/api/v1/free/finnhub/company-news",
-    "/api/v1/free/finnhub/earnings",
-    "/api/v1/free/finnhub/forex",
-    "/api/v1/free/finnhub/insider",
-    "/api/v1/free/finnhub/news",
-    "/api/v1/free/finnhub/quote",
-    "/api/v1/free/finnhub/recommendations",
-    "/api/v1/free/mempool/fees",
-    "/api/v1/free/perpfinder/funding",
-    "/api/v1/free/perpfinder/liquidations",
-    "/api/v1/free/perpfinder/open-interest",
-    "/api/v1/free/polymarket/crypto",
-    "/api/v1/binance/testnet/health",
-    "/api/v1/binance/testnet/price",
+    # The crypto surface is gone. /assets/*, /free/*, /binance/testnet/* and
+    # /portfolio/correlation were removed with the multi-asset engine, so the
+    # public list is short on purpose: Forex candles and the liveness probe.
+    # /api/v1/fear-greed, /funding-rates and /open-interest are still listed
+    # because routers/market.py still serves them; they go when the remaining
+    # crypto fetchers in market_data.py are stripped.
 }
 # NOTE: /docs, /redoc and /openapi.json are FastAPI built-ins, not APIRoute
 # instances, so they stay outside this inventory either way. They used to be
@@ -79,7 +51,6 @@ EXPLICIT = {
     "/api/v1/health/detailed": True,
     "/api/v1/metrics": True,
     "/api/v1/ai/status": True,
-    "/api/v1/binance/testnet/status": True,
     "/api/v1/execution/estimate-slippage": True,
     "/api/v1/data-quality/ohlcv": True,
 }
@@ -155,7 +126,6 @@ def test_financial_reads_are_protected():
         "/api/v1/risk/concentration",
         "/api/v1/supervisor",
         "/api/v1/portfolio/daily-report",
-        "/api/v1/portfolio/correlation",
         "/api/v1/engine/status",
         "/api/v1/engine/stats",
         "/api/v1/engine/logs",

@@ -18,8 +18,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from .rate_limit import limiter as _shared_limiter, LIVENESS_LIMIT
 
-from . import advisor, backtesting, backtesting_advanced, binance_testnet, coach, config, data_quality, deployment, engine, execution, features, journal, lab, learning, market_data, memory, ml_regime, multi_asset, oms, optimizer, position_monitor, regime, risk, security, storage, strategy_registry, supervisor
-from .routers import backtesting as backtesting_router, market as market_router, risk as risk_router, ai as ai_router, free_apis as free_apis_router
+from . import advisor, backtesting, backtesting_advanced, coach, config, data_quality, deployment, engine, execution, features, journal, lab, learning, market_data, memory, ml_regime, oms, optimizer, position_monitor, regime, risk, security, storage, strategy_registry, supervisor
+from .routers import backtesting as backtesting_router, market as market_router, risk as risk_router, ai as ai_router
 from .logging_config import setup_logging, request_id_var
 from . import metrics as app_metrics
 
@@ -126,7 +126,6 @@ app.include_router(backtesting_router.router)
 app.include_router(market_router.router)
 app.include_router(risk_router.router)
 app.include_router(ai_router.router)
-app.include_router(free_apis_router.router)
 
 # ICT Dashboard router (initialize with instances)
 try:
@@ -909,14 +908,6 @@ def get_position_risks(_admin: None = Depends(require_admin_token)) -> dict:
     }
 
 
-@app.get("/api/v1/portfolio/correlation")
-def get_portfolio_correlation(_admin: None = Depends(require_admin_token)) -> dict:
-    """Multi-asset correlation analysis with dynamic sizing recommendations."""
-    from .multi_asset_correlation import compute_portfolio_correlation_risk
-    symbols = list(config.FOCUSED_SYMBOLS if config.FOCUSED_MODE else ("BTCUSDT", "ETHUSDT", "SOLUSDT"))
-    return compute_portfolio_correlation_risk(symbols)
-
-
 @app.get("/api/v1/portfolio/daily-report")
 def get_daily_report(date: str | None = None, _admin: None = Depends(require_admin_token)) -> dict:
     """Generate comprehensive daily report with PnL, trades, regimes, and performance."""
@@ -1290,98 +1281,6 @@ def ml_regime_summary(_admin: None = Depends(require_admin_token)) -> dict:
     """Get ML model summary and feature importance."""
     return ml_regime.predictor.summary()
 
-
-# === Binance Testnet ===
-
-@app.get("/api/v1/binance/testnet/status")
-def binance_testnet_status(_admin: None = Depends(require_admin_token)) -> dict:
-    client = binance_testnet.BinanceTestnet()
-    return client.test_connection()
-
-
-@app.get("/api/v1/binance/testnet/price")
-def binance_testnet_price(symbol: str = "BTCUSDT") -> dict:
-    client = binance_testnet.BinanceTestnet()
-    return client.get_price(symbol)
-
-
-@app.get("/api/v1/binance/testnet/account")
-def binance_testnet_account(_admin: None = Depends(require_admin_token)) -> dict:
-    client = binance_testnet.BinanceTestnet()
-    return client.get_account()
-
-
-@app.post("/api/v1/binance/testnet/order/market", status_code=201)
-def binance_testnet_market_order(symbol: str, side: str, quantity: float, _admin: None = Depends(require_admin_token)) -> dict:
-    client = binance_testnet.BinanceTestnet()
-    return client.place_market_order(symbol, side, quantity)
-
-
-@app.post("/api/v1/binance/testnet/order/limit", status_code=201)
-def binance_testnet_limit_order(symbol: str, side: str, quantity: float, price: float, _admin: None = Depends(require_admin_token)) -> dict:
-    client = binance_testnet.BinanceTestnet()
-    return client.place_limit_order(symbol, side, quantity, price)
-
-
-@app.delete("/api/v1/binance/testnet/order")
-def binance_testnet_cancel_order(symbol: str, order_id: int, _admin: None = Depends(require_admin_token)) -> dict:
-    client = binance_testnet.BinanceTestnet()
-    return client.cancel_order(symbol, order_id)
-
-
-@app.get("/api/v1/binance/testnet/orders")
-def binance_testnet_orders(symbol: str | None = None, _admin: None = Depends(require_admin_token)) -> list[dict]:
-    client = binance_testnet.BinanceTestnet()
-    return client.get_open_orders(symbol)
-
-
-@app.get("/api/v1/binance/testnet/klines")
-def binance_testnet_klines(symbol: str = "BTCUSDT", interval: str = "1h", limit: int = 500, _admin: None = Depends(require_admin_token)) -> list[dict]:
-    client = binance_testnet.BinanceTestnet()
-    return client.get_klines(symbol, interval, limit)
-
-
-@app.get("/api/v1/binance/testnet/health")
-def binance_testnet_health() -> dict:
-    client = binance_testnet.BinanceTestnet()
-    return client.health_check()
-
-
-# === Multi-Asset ===
-
-@app.get("/api/v1/assets/classes")
-def get_asset_classes() -> dict:
-    return multi_asset.get_asset_classes()
-
-
-@app.get("/api/v1/assets/symbols")
-def get_supported_symbols() -> list[str]:
-    return multi_asset.get_supported_symbols()
-
-
-@app.get("/api/v1/assets/price")
-def get_asset_price(symbol: str, asset_class: str | None = None) -> dict:
-    return multi_asset.fetch_asset_price(symbol, asset_class)
-
-
-@app.get("/api/v1/assets/ohlcv")
-def get_asset_ohlcv(symbol: str, interval: str = "1h", limit: int = 200, asset_class: str | None = None) -> list[dict]:
-    return multi_asset.fetch_asset_ohlcv(symbol, interval, limit, asset_class)
-
-
-@app.get("/api/v1/assets/forex")
-def get_forex_rates(base: str = "USD") -> dict:
-    return multi_asset.fetch_forex_rates(base)
-
-
-@app.get("/api/v1/assets/commodities")
-def get_commodity_prices() -> list[dict]:
-    return multi_asset.fetch_commodity_prices()
-
-
-@app.get("/api/v1/assets/stock/{symbol}")
-def get_stock_price(symbol: str) -> dict:
-    return multi_asset.fetch_stock_price(symbol)
 
 
 
