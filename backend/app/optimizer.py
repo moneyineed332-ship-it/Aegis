@@ -260,50 +260,6 @@ def optimize_donchian(candles: list[dict], capital: float = 10_000, *,
                    "donchian", test_fraction, embargo, interval)
 
 
-def optimize_mean_reversion(candles: list[dict], capital: float = 10_000, *,
-                            test_fraction: float = DEFAULT_TEST_FRACTION,
-                            embargo: int = DEFAULT_EMBARGO_CANDLES,
-                            interval: str = "1h") -> dict:
-    """Grid search optimization for Mean Reversion parameters, validated out-of-sample."""
-    from .mean_reversion import run_mean_reversion
-
-    def build(values, cap):
-        entry, exit_z, period = values
-        return {
-            "period": period, "entry_z_score": entry, "exit_z_score": exit_z,
-            "initial_capital": cap, "allocation": 0.95, "fee_bps": 10,
-            "slippage_bps": 5, "interval": interval,
-        }
-
-    def label(values):
-        return {"entry_z": values[0], "exit_z": values[1], "period": values[2]}
-
-    candidates = list(product([-1.5, -2.0, -2.5, -3.0], [-0.5, 0.0, 0.5], [15, 20, 25, 30]))
-    return _search(candles, capital, candidates, build, run_mean_reversion, label,
-                   "mean_reversion", test_fraction, embargo, interval)
-
-
-def optimize_grid(candles: list[dict], capital: float = 10_000, *,
-                  test_fraction: float = DEFAULT_TEST_FRACTION,
-                  embargo: int = DEFAULT_EMBARGO_CANDLES,
-                  interval: str = "1h") -> dict:
-    """Grid search optimization for Grid trading parameters, validated out-of-sample."""
-    from .grid import run_grid
-
-    def build(values, cap):
-        count, spread = values
-        return {
-            "grid_count": count, "grid_spread_pct": spread, "initial_capital": cap,
-            "allocation": 0.95, "fee_bps": 10, "slippage_bps": 5, "interval": interval,
-        }
-
-    def label(values):
-        return {"count": values[0], "spread": values[1]}
-
-    candidates = list(product([5, 8, 10, 12, 15, 20], [0.005, 0.01, 0.015, 0.02, 0.025, 0.03]))
-    return _search(candles, capital, candidates, build, run_grid, label,
-                   "grid", test_fraction, embargo, interval)
-
 
 def _generate_recommendation(best: dict, strategy_type: str, oos: dict | None,
                              verdict: str) -> str:

@@ -18,7 +18,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from .rate_limit import limiter as _shared_limiter, LIVENESS_LIMIT
 
-from . import advisor, backtesting, backtesting_advanced, coach, config, data_quality, deployment, engine, execution, features, journal, lab, learning, market_data, memory, ml_regime, oms, optimizer, position_monitor, regime, risk, security, storage, strategy_registry, supervisor
+from . import advisor, backtesting, coach, config, data_quality, deployment, engine, execution, features, journal, lab, learning, market_data, memory, ml_regime, oms, optimizer, position_monitor, regime, risk, security, storage, strategy_registry, supervisor
 from .routers import backtesting as backtesting_router, market as market_router, risk as risk_router, ai as ai_router
 from .logging_config import setup_logging, request_id_var
 from . import metrics as app_metrics
@@ -190,7 +190,7 @@ def dashboard(_admin: None = Depends(require_admin_token)) -> dict:
     # Compute fresh dashboard
     positions = storage.list_positions()
     # Utiliser les symboles ICT/SMC si configurés, sinon fallback sur symboles existants
-    primary_symbol = config.ICT_PRIMARY_INSTRUMENT if hasattr(config, 'ICT_PRIMARY_INSTRUMENT') else (config.FOCUSED_SYMBOLS[0] if config.FOCUSED_MODE else "BTCUSDT")
+    primary_symbol = config.ICT_PRIMARY_INSTRUMENT
     candles = storage.list_ohlcv_candles(primary_symbol, "1h", limit=500)
     quality = data_quality.validate_ohlcv(candles, "1h")
     analysis = None
@@ -217,8 +217,13 @@ def dashboard(_admin: None = Depends(require_admin_token)) -> dict:
     concentration_data = None
     if quality["valid"] and len(candles) >= 30:
         try:
-            btc_position_value = sum(abs(p["quantity"] * p["average_price"]) for p in positions if p["symbol"] == "BTCUSDT")
-            stress_test_data = risk.stress_test(candles, INITIAL_CAPITAL, btc_position_value)
+            # Was hardcoded to BTCUSDT, which on a Forex-only book was always
+            # zero, so the stress test ran against no exposure at all. Every
+            # open position now contributes.
+            gross_exposure = sum(
+                abs(p["quantity"] * p["average_price"]) for p in positions
+            )
+            stress_test_data = risk.stress_test(candles, INITIAL_CAPITAL, gross_exposure)
         except (ValueError, Exception):
             pass
         # Correlation across the active universe
@@ -313,7 +318,7 @@ def create_paper_order(
 
 @app.get("/api/v1/data-quality/ohlcv")
 def ohlcv_quality(
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
     _admin: None = Depends(require_admin_token),
 ) -> dict:
@@ -322,7 +327,7 @@ def ohlcv_quality(
 
 @app.get("/api/v1/risk/summary")
 def risk_summary(
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
     _admin: None = Depends(require_admin_token),
 ) -> dict:
@@ -352,7 +357,7 @@ def journal_outcomes(_admin: None = Depends(require_admin_token)) -> list[dict]:
     prices = {s["symbol"]: s["price"] for s in snapshots}
     outcomes = []
     for dec in decisions:
-        symbol = dec.get("symbol", "BTCUSDT")
+        symbol = dec.get("symbol", config.ICT_PRIMARY_INSTRUMENT)
         current_price = prices.get(symbol, 0)
         tracked = journal.track_outcome(dec, current_price)
         outcomes.append({**tracked, "symbol": symbol})
@@ -361,7 +366,7 @@ def journal_outcomes(_admin: None = Depends(require_admin_token)) -> list[dict]:
 
 @app.get("/api/v1/market-analysis")
 def market_analysis(
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
     _admin: None = Depends(require_admin_token),
 ) -> dict:
@@ -378,7 +383,7 @@ def market_analysis(
 
 @app.post("/api/v1/decisions/recommendation", status_code=201)
 def recommendation(
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
     _admin: None = Depends(require_admin_token),
 ) -> dict:
@@ -447,7 +452,7 @@ def lab_promotions(_admin: None = Depends(require_admin_token)) -> list[dict]:
 
 
 @app.get("/api/v1/memory")
-def memory_list(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT", _admin: None = Depends(require_admin_token)) -> dict:
+def memory_list(symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD", _admin: None = Depends(require_admin_token)) -> dict:
     episodes = storage.list_memory_episodes(symbol, limit=100)
     return {
         "summary": memory.summarize_episodes(episodes),
@@ -457,7 +462,7 @@ def memory_list(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "
 
 @app.post("/api/v1/memory/remember", status_code=201)
 def memory_remember(
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     strategy: str = "unknown",
     _admin: None = Depends(require_admin_token),
 ) -> dict:
@@ -475,7 +480,7 @@ def memory_remember(
 
 @app.get("/api/v1/memory/compare")
 def memory_compare(
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     _admin: None = Depends(require_admin_token),
 ) -> dict:
     candles = storage.list_ohlcv_candles(symbol, "1h", limit=100)
@@ -518,7 +523,7 @@ def resume(_admin: None = Depends(require_admin_token)) -> dict:
 @limiter.limit("10/minute")
 def execute_market_order(
     request: Request,
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     side: Literal["buy", "sell"] = "buy",
     quantity: float = 0.001,
     _admin: None = Depends(require_admin_token),
@@ -554,7 +559,7 @@ def execute_market_order(
 @limiter.limit("10/minute")
 def execute_limit_order(
     request: Request,
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     side: Literal["buy", "sell"] = "buy",
     quantity: float = 0.001,
     limit_price: float = 0,
@@ -593,7 +598,7 @@ def execute_limit_order(
 @limiter.limit("10/minute")
 def execute_fractioned_order(
     request: Request,
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     side: Literal["buy", "sell"] = "buy",
     quantity: float = Query(default=0.01, gt=0, le=10),
     chunks: int = Query(default=3, ge=1, le=10),
@@ -641,7 +646,7 @@ def estimate_slippage(order_value: float = 100, _admin: None = Depends(require_a
 def create_deployment_pipeline(
     request: Request,
     strategy_id: str = "sma_crossover_long_flat",
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     _admin: None = Depends(require_admin_token),
 ) -> dict:
     return deployment.create_pipeline(strategy_id, symbol, {})
@@ -664,7 +669,7 @@ def validate_deployment_backtest(
 
 @app.post("/api/v1/ohlcv/refresh", status_code=201)
 def refresh_ohlcv(
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
     limit: int = Query(default=200, ge=10, le=500),
     _admin: None = Depends(require_admin_token),
@@ -680,7 +685,7 @@ def refresh_ohlcv(
 
 @app.post("/api/v1/optimizer/sma", status_code=200)
 def optimize_sma_strategy(
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
     _admin: None = Depends(require_admin_token),
 ) -> dict:
@@ -696,7 +701,7 @@ def optimize_sma_strategy(
 
 @app.post("/api/v1/optimizer/donchian", status_code=200)
 def optimize_donchian_strategy(
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
     _admin: None = Depends(require_admin_token),
 ) -> dict:
@@ -710,41 +715,10 @@ def optimize_donchian_strategy(
     return result
 
 
-@app.post("/api/v1/optimizer/mean-reversion", status_code=200)
-def optimize_mean_reversion_strategy(
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
-    interval: Literal["5m", "15m", "1h", "4h"] = "1h",
-    _admin: None = Depends(require_admin_token),
-) -> dict:
-    candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
-    quality = data_quality.validate_ohlcv(candles, interval)
-    if not quality["valid"]:
-        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    result = optimizer.optimize_mean_reversion(candles, INITIAL_CAPITAL, interval=interval)
-    result["symbol"] = symbol
-    result["interval"] = interval
-    return result
-
-
-@app.post("/api/v1/optimizer/grid", status_code=200)
-def optimize_grid_strategy(
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
-    interval: Literal["5m", "15m", "1h", "4h"] = "1h",
-    _admin: None = Depends(require_admin_token),
-) -> dict:
-    candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
-    quality = data_quality.validate_ohlcv(candles, interval)
-    if not quality["valid"]:
-        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-    result = optimizer.optimize_grid(candles, INITIAL_CAPITAL, interval=interval)
-    result["symbol"] = symbol
-    result["interval"] = interval
-    return result
-
 
 @app.post("/api/v1/optimizer/compare", status_code=200)
 def compare_all_strategies(
-    symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT",
+    symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD",
     interval: Literal["5m", "15m", "1h", "4h"] = "1h",
     _admin: None = Depends(require_admin_token),
 ) -> dict:
@@ -755,8 +729,6 @@ def compare_all_strategies(
     results = {
         "sma_crossover": optimizer.optimize_sma(candles, INITIAL_CAPITAL, interval=interval),
         "donchian_breakout": optimizer.optimize_donchian(candles, INITIAL_CAPITAL, interval=interval),
-        "mean_reversion": optimizer.optimize_mean_reversion(candles, INITIAL_CAPITAL, interval=interval),
-        "grid": optimizer.optimize_grid(candles, INITIAL_CAPITAL, interval=interval),
     }
     comparison = optimizer.compare_strategies(results)
     comparison["symbol"] = symbol
@@ -1132,105 +1104,11 @@ def get_security_summary(_admin: None = Depends(require_admin_token)) -> dict:
     return security.get_security_summary()
 
 
-# === Advanced Backtesting ===
-
-@app.post("/api/v1/backtests/advanced/walk-forward", status_code=201)
-def advanced_walk_forward(
-    symbol: str = "BTCUSDT",
-    interval: str = "1h",
-    objective: str = "sharpe_ratio",
-    n_splits: int = 3,
-    _admin: None = Depends(require_admin_token),
-) -> dict:
-    candles = storage.list_ohlcv_candles(symbol, interval, limit=3000)
-    quality = data_quality.validate_ohlcv(candles, interval)
-    if not quality["valid"]:
-        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-
-    base_params = {
-        "initial_capital": INITIAL_CAPITAL, "allocation": 0.95,
-        "fee_bps": 10, "slippage_bps": 5, "interval": interval,
-    }
-    param_grid = {
-        "fast_period": [5, 10, 15, 20, 25],
-        "slow_period": [30, 40, 50, 60, 80],
-    }
-    result = backtesting_advanced.walk_forward_optimize(
-        candles, backtesting.run_sma_crossover, base_params, param_grid,
-        train_ratio=0.7, n_splits=n_splits, objective=objective,
-    )
-    result["symbol"] = symbol
-    result["interval"] = interval
-    return result
-
-
-@app.post("/api/v1/backtests/advanced/monte-carlo", status_code=201)
-def monte_carlo(
-    symbol: str = "BTCUSDT",
-    interval: str = "1h",
-    fast_period: int = 10,
-    slow_period: int = 30,
-    n_simulations: int = Query(default=1000, ge=10, le=5000),
-    seed: int | None = None,
-    _admin: None = Depends(require_admin_token),
-) -> dict:
-    candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
-    quality = data_quality.validate_ohlcv(candles, interval)
-    if not quality["valid"]:
-        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-
-    params = {
-        "fast_period": fast_period, "slow_period": slow_period,
-        "initial_capital": INITIAL_CAPITAL, "allocation": 0.95,
-        "fee_bps": 10, "slippage_bps": 5, "interval": interval,
-    }
-    result = backtesting_advanced.monte_carlo_simulation(
-        candles, backtesting.run_sma_crossover, params, n_simulations,
-        seed=seed,
-    )
-    result["symbol"] = symbol
-    result["interval"] = interval
-    return result
-
-
-@app.post("/api/v1/backtests/advanced/sensitivity", status_code=201)
-def sensitivity(
-    symbol: str = "BTCUSDT",
-    interval: str = "1h",
-    param_name: str = "fast_period",
-    _admin: None = Depends(require_admin_token),
-) -> dict:
-    candles = storage.list_ohlcv_candles(symbol, interval, limit=2000)
-    quality = data_quality.validate_ohlcv(candles, interval)
-    if not quality["valid"]:
-        raise HTTPException(422, {"message": "OHLCV quality gate failed.", "quality": quality})
-
-    base_params = {
-        "fast_period": 10, "slow_period": 30,
-        "initial_capital": INITIAL_CAPITAL, "allocation": 0.95,
-        "fee_bps": 10, "slippage_bps": 5, "interval": interval,
-    }
-    param_ranges = {
-        "fast_period": [5, 8, 10, 12, 15, 20, 25, 30],
-        "slow_period": [20, 30, 40, 50, 60, 80, 100],
-        "allocation": [0.5, 0.7, 0.8, 0.9, 0.95],
-        "fee_bps": [0, 5, 10, 15, 20],
-    }
-    param_range = param_ranges.get(param_name, [1, 2, 3, 4, 5])
-
-    result = backtesting_advanced.sensitivity_analysis(
-        candles, backtesting.run_sma_crossover, base_params, param_name, param_range,
-    )
-    result["symbol"] = symbol
-    result["interval"] = interval
-    return result
-
-
 # === ML Regime Prediction ===
 
 @app.post("/api/v1/ml/regime/train", status_code=201)
 @limiter.limit("2/minute")
-def train_ml_regime(request: Request, symbol: str = "BTCUSDT", interval: str = "1h", epochs: int = 200, _admin: None = Depends(require_admin_token)) -> dict:
+def train_ml_regime(request: Request, symbol: str = config.ICT_PRIMARY_INSTRUMENT, interval: str = "1h", epochs: int = 200, _admin: None = Depends(require_admin_token)) -> dict:
     """Train ML regime predictor from historical features."""
     candles = storage.list_ohlcv_candles(symbol, interval, limit=5000)
     if len(candles) < 200:
@@ -1258,7 +1136,7 @@ def train_ml_regime(request: Request, symbol: str = "BTCUSDT", interval: str = "
 
 
 @app.get("/api/v1/ml/regime/predict")
-def predict_regime(symbol: str = "BTCUSDT", interval: str = "1h", _admin: None = Depends(require_admin_token)) -> dict:
+def predict_regime(symbol: str = config.ICT_PRIMARY_INSTRUMENT, interval: str = "1h", _admin: None = Depends(require_admin_token)) -> dict:
     """Predict current regime using trained ML model."""
     candles = storage.list_ohlcv_candles(symbol, interval, limit=200)
     if len(candles) < 50:
@@ -1385,3 +1263,5 @@ def oms_set_mode(request: Request, mode: str = "paper", _admin: None = Depends(r
     security.log_mode_switch(old_mode, mode)
     storage.log_engine_event("mode-switch", "mode_changed", {"old_mode": old_mode, "new_mode": mode}, "warning")
     return {"mode": mode, "message": f"Execution mode set to {mode}"}
+
+

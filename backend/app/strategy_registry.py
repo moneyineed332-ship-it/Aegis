@@ -7,11 +7,11 @@ from . import config
 STRATEGIES = [
     {"id": "sma_crossover_long_flat", "name": "SMA Crossover", "type": "trend_following", "status": "confirmation"},
     {"id": "donchian_breakout_long_flat", "name": "Donchian Breakout", "type": "trend_following", "status": "active"},
-    {"id": "mean_reversion_bollinger", "name": "Mean Reversion Bollinger", "type": "mean_reversion", "status": "disabled"},
-    {"id": "grid_adaptive", "name": "Grid Adaptatif", "type": "grid", "status": "disabled"},
-    {"id": "scalping_ema_rsi_stoch", "name": "Scalping EMA/RSI/Stoch", "type": "scalping", "status": "disabled"},
-    {"id": "swing_macd_fibonacci", "name": "Swing MACD/Fibonacci", "type": "swing", "status": "disabled"},
-    {"id": "intraday_vwap_rsi", "name": "Intraday VWAP/RSI", "type": "intraday", "status": "disabled"},
+    # mean_reversion_bollinger, grid_adaptive, scalping_ema_rsi_stoch,
+    # swing_macd_fibonacci and intraday_vwap_rsi went out with the crypto
+    # engine. Each was backed by a module that only ever ran on 24/7 crypto
+    # markets: no session close, no swap, so a grid or a scalping loop had
+    # nothing to hold it to a Forex book.
     {"id": "smc_ict", "name": "SMC/ICT Smart Money", "type": "smc_ict", "status": "disabled"},
     {"id": "multi_timeframe_confluence", "name": "Multi-TF Confluence", "type": "multi_timeframe", "status": "disabled"},
     {"id": "multi_scale_crossover", "name": "Multi-Scale Crossover", "type": "trend_following", "status": "disabled"},

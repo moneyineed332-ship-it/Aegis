@@ -16,13 +16,17 @@ from . import config, learning, strategy_registry
 logger = logging.getLogger(__name__)
 
 
-# Regime → default strategy mapping (fallback when no learning data)
+# Regime → default strategy mapping (fallback when no learning data).
+# range and low_volatility used to map to mean_reversion_bollinger and
+# grid_adaptive, both crypto strategies that no longer exist. There is no
+# Forex range strategy in the registry yet, so they map to smc_ict, which the
+# risk manager decides on in a ranging market anyway.
 DEFAULT_STRATEGY_MAP = {
     "bull_trend": "smc_ict",
     "bear_trend": "smc_ict",
-    "range": "mean_reversion_bollinger",
+    "range": "smc_ict",
     "high_volatility": "multi_timeframe_confluence",
-    "low_volatility": "grid_adaptive",
+    "low_volatility": "smc_ict",
     "capitulation": "multi_timeframe_confluence",
     "euphoria": "smc_ict",
 }
@@ -33,12 +37,7 @@ STRATEGY_PRIORITY = {
     "multi_timeframe_confluence": 2,
     "multi_scale_crossover": 3,
     "donchian_breakout_long_flat": 4,
-    "mean_reversion_bollinger": 5,
-    "grid_adaptive": 6,
-    "sma_crossover_long_flat": 7,
-    "scalping_ema_rsi_stoch": 8,
-    "swing_macd_fibonacci": 9,
-    "intraday_vwap_rsi": 10,
+    "sma_crossover_long_flat": 5,
 }
 
 
@@ -164,12 +163,7 @@ def _build_reason(regime: str, strategy: str) -> str:
         "multi_timeframe_confluence": "Multi-Timeframe Confluence",
         "multi_scale_crossover": "Multi-Scale Crossover",
         "donchian_breakout_long_flat": "Donchian Breakout",
-        "mean_reversion_bollinger": "Mean Reversion Bollinger",
-        "grid_adaptive": "Grid Adaptatif",
         "sma_crossover_long_flat": "SMA Crossover",
-        "scalping_ema_rsi_stoch": "Scalping EMA/RSI/Stoch",
-        "swing_macd_fibonacci": "Swing MACD/Fibonacci",
-        "intraday_vwap_rsi": "Intraday VWAP/RSI",
     }
     name = strategy_names.get(strategy, strategy)
     return f"{regime} regime → {name} selected for optimal performance"
