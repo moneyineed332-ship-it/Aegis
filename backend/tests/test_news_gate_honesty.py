@@ -12,6 +12,8 @@ simulated calendar in, which would look like protection while blocking on invent
 dates.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 
 from app.news_filter import default_news_filter
@@ -105,8 +107,13 @@ class TestRiskManagerSurfacesTheGap:
 
         rm = IctRiskManager(initial_capital=50.0)
         with caplog.at_level(logging.WARNING, logger="app.ict_risk_manager"):
+            # now is pinned inside the london session. Without it this test only
+            # passed between 08:00 and 22:00 UTC: outside those hours the session
+            # gate refused the trade first and can_trade was False for a reason
+            # that has nothing to do with the news filter this file is about.
             status = rm.check_all_limits("EURUSD", 1.1370, 1.1330, 1.1450,
-                                         direction="buy", current_atr_pips=30)
+                                         direction="buy", current_atr_pips=30,
+                                         now=datetime(2026, 1, 15, 10, 0, tzinfo=timezone.utc))
         assert not any("news" in r.lower() for r in status.blocking_reasons)
         assert status.can_trade is True
 

@@ -312,8 +312,10 @@ class IctRiskManager:
             instrument,
         )
 
-    def check_account_limits(self, instrument: Instrument) -> RiskStatus:
+    def check_account_limits(self, instrument: Instrument, now: datetime | None = None) -> RiskStatus:
         """Account-level gates only, for a dashboard with no candidate signal.
+
+        `now` is threaded into the session gate; see check_all_limits.
 
         The ICT dashboard used to call check_all_limits(instrument, 0, 0, 0) to
         fill its can_trade field. Zero levels make the R:R zero, so it reported
@@ -359,8 +361,8 @@ class IctRiskManager:
             if open_count >= limits.max_simultaneous_positions:
                 reasons.append(f"Max simultaneous positions: {open_count}/{limits.max_simultaneous_positions}")
 
-            session_allowed = is_trading_allowed(instrument)
-            session_status = get_session_status(instrument)
+            session_allowed = is_trading_allowed(instrument, now=now)
+            session_status = get_session_status(instrument, now=now)
             session_reason = "OK" if session_allowed else f"Hors session (prochaine dans {session_status.get('time_until_next_session_seconds', 0)/60:.0f}min)"
             if not session_allowed:
                 reasons.append(session_reason)
@@ -415,9 +417,18 @@ class IctRiskManager:
         position_mode: PositionMode = "fixed_tp",
         current_atr_pips: float | None = None,
         direction: Literal["buy", "sell"] = "buy",  # Add direction parameter
+        now: datetime | None = None,
     ) -> RiskStatus:
         """
         Vérification COMPLÈTE avant d'autoriser un trade.
+
+        `now` is threaded into the session gate only. Every method on
+        session_filter already accepts one, but the risk manager was calling
+        `is_trading_allowed(instrument)` and letting it read the wall clock, so
+        any test asserting can_trade True only passed inside a trading session.
+        Trading hours are 08:00-22:00 UTC, which left the suite unable to run
+        green for ten hours a day. Production behaviour is unchanged: `now`
+        defaults to None and the session filter fills in the current time.
         
         Cahier des charges §18 - Le Risk Manager vérifie :
         1. limite de risque
@@ -509,8 +520,8 @@ class IctRiskManager:
                 blocking_reasons.append(f"R:R insuffisant: {rr:.2f} < {limits.min_rr_ratio:.2f}")
             
             # 9. FILTRE SESSION HORAIRE
-            session_allowed = is_trading_allowed(instrument)
-            session_status = get_session_status(instrument)
+            session_allowed = is_trading_allowed(instrument, now=now)
+            session_status = get_session_status(instrument, now=now)
             session_reason = "OK" if session_allowed else f"Hors session (prochaine dans {session_status.get('time_until_next_session_seconds', 0)/60:.0f}min)"
             if not session_allowed:
                 blocking_reasons.append(session_reason)
