@@ -117,44 +117,13 @@ def refresh_market_snapshots(_admin: None = Depends(require_admin_token)) -> lis
 
 
 @router.get("/ohlcv")
-def get_ohlcv(symbol: Literal["EURUSD", "GBPUSD", "XAUUSD", "PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "EURUSD", interval: Literal["5m", "15m", "1h", "4h"] = "1h", limit: int = 200) -> list[dict]:
+def get_ohlcv(symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD", interval: Literal["5m", "15m", "1h", "4h"] = "1h", limit: int = 200) -> list[dict]:
     return market_data.fetch_ohlcv(symbol, interval, limit)
 
 
 @router.post("/ohlcv/refresh-history")
-def refresh_history(symbol: Literal["EURUSD", "GBPUSD", "XAUUSD", "PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "EURUSD", interval: Literal["5m", "15m", "1h", "4h"] = "1h", batches: int = 4, _admin: None = Depends(require_admin_token)) -> dict:
+def refresh_history(symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD", interval: Literal["5m", "15m", "1h", "4h"] = "1h", batches: int = 4, _admin: None = Depends(require_admin_token)) -> dict:
     candles = market_data.fetch_ohlcv(symbol, interval, limit=batches * 200)
     return {"symbol": symbol, "interval": interval, "candles": len(candles)}
 
 
-@router.get("/fear-greed")
-def get_fear_greed() -> list[dict]:
-    return storage.list_fear_greed()
-
-
-@router.post("/fear-greed/refresh")
-def refresh_fear_greed(_admin: None = Depends(require_admin_token)) -> dict:
-    data = market_data.fetch_fear_greed()
-    return storage.save_fear_greed(data)
-
-
-@router.get("/funding-rates")
-def get_funding_rates(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> list[dict]:
-    return storage.list_funding_rates(symbol)
-
-
-@router.post("/funding-rates/refresh")
-def refresh_funding_rates(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT", _admin: None = Depends(require_admin_token)) -> dict:
-    data = market_data.fetch_funding_rates(symbol)
-    return storage.save_funding_rate(data)
-
-
-@router.get("/open-interest")
-def get_open_interest(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT") -> list[dict]:
-    return storage.list_open_interest(symbol)
-
-
-@router.post("/open-interest/refresh")
-def refresh_open_interest(symbol: Literal["PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "BTCUSDT", _admin: None = Depends(require_admin_token)) -> dict:
-    data = market_data.fetch_open_interest(symbol)
-    return storage.save_open_interest(data)

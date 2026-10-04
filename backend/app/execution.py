@@ -386,10 +386,14 @@ def execute_limit_order(
 
 def get_execution_mode() -> dict:
     """Get current execution mode info."""
+    # "exchange" used to report config.LIVE_EXCHANGE_ID, a Binance id. There is
+    # no venue any more: execution goes through the paper path, and the MT5
+    # adapter is not built yet. Reporting "paper" unconditionally is the honest
+    # answer rather than a stale exchange name.
     return {
         "mode": config.MODE,
-        "exchange": config.LIVE_EXCHANGE_ID if config.MODE == "live" else "paper",
-        "testnet": config.LIVE_TESTNET if config.MODE == "live" else True,
+        "venue": "paper",
+        "live_venue_available": False,
         "max_order_notional": config.MAX_ORDER_NOTIONAL,
         "max_total_exposure": config.MAX_TOTAL_EXPOSURE,
         "order_min_notional": config.ORDER_MIN_NOTIONAL,

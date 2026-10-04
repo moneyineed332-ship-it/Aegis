@@ -93,8 +93,19 @@ TOTAL_EXPOSURE_CAP_MULT = float(os.getenv("AEGIS_TOTAL_EXPOSURE_CAP_MULT", "1.5"
 # --- Execution Defaults ---
 DEFAULT_FEE_BPS = float(os.getenv("AEGIS_DEFAULT_FEE_BPS", "10"))
 DEFAULT_SLIPPAGE_BPS = float(os.getenv("AEGIS_DEFAULT_SLIPPAGE_BPS", "5"))
+# Minimum order notional, enforced by oms._validate_pre_trade on every order and
+# reported by execution.get_execution_mode. At 10 EUR this is what makes a 50 EUR
+# account meaningful: the smallest trade is a fifth of the book.
+ORDER_MIN_NOTIONAL = float(os.getenv("AEGIS_ORDER_MIN_NOTIONAL", "10"))  # min order value
 DEFAULT_CHUNKS = int(os.getenv("AEGIS_DEFAULT_CHUNKS", "3"))
 DEFAULT_DELAY_MS = int(os.getenv("AEGIS_DEFAULT_DELAY_MS", "500"))
+
+# --- Market Data Sources ---
+# The Yahoo endpoint is the one that matters now: MT5 is Windows-only, so on a
+# container this is the path that actually returns candles. Note that
+# market_data._fetch_yahoo_chart hardcodes its own copy of this URL and does not
+# read the attribute, so changing this alone has no effect until that is fixed.
+YAHOO_FINANCE_URL = os.getenv("AEGIS_YAHOO_FINANCE_URL", "https://query1.finance.yahoo.com/v8/finance/chart")
 
 # --- Timeouts (seconds) ---
 HTTP_TIMEOUT = int(os.getenv("AEGIS_HTTP_TIMEOUT", "15"))
@@ -115,60 +126,12 @@ OPENROUTER_BASE_URL = os.getenv("AEGIS_OPENROUTER_BASE_URL", "https://openrouter
 OPENROUTER_TEMPERATURE = float(os.getenv("AEGIS_OPENROUTER_TEMPERATURE", "0.3"))
 OPENROUTER_MAX_TOKENS = int(os.getenv("AEGIS_OPENROUTER_MAX_TOKENS", "2048"))
 
-# --- CCXT Exchange ---
-CCXT_EXCHANGE_ID = os.getenv("AEGIS_CCXT_EXCHANGE_ID", "binance")
-CCXT_TESTNET = os.getenv("AEGIS_CCXT_TESTNET", "true").lower() == "true"
 
-# --- Live Exchange Credentials (paper mode ignores these) ---
-LIVE_EXCHANGE_ID = os.getenv("AEGIS_LIVE_EXCHANGE_ID", "binance")
-LIVE_API_KEY = _decrypt_env(os.getenv("AEGIS_LIVE_API_KEY", ""))
-LIVE_API_SECRET = _decrypt_env(os.getenv("AEGIS_LIVE_API_SECRET", ""))
-LIVE_TESTNET = os.getenv("AEGIS_LIVE_TESTNET", "true").lower() == "true"
-LIVE_EXCHANGE_OPTIONS = os.getenv("AEGIS_LIVE_EXCHANGE_OPTIONS", "{}")  # JSON dict of extra options
-
-# --- Order Execution ---
-ORDER_RETRY_ATTEMPTS = int(os.getenv("AEGIS_ORDER_RETRY_ATTEMPTS", "3"))
-ORDER_RETRY_DELAY = float(os.getenv("AEGIS_ORDER_RETRY_DELAY", "1.0"))  # seconds
-ORDER_TIMEOUT = int(os.getenv("AEGIS_ORDER_TIMEOUT", "30"))  # seconds
-ORDER_MIN_NOTIONAL = float(os.getenv("AEGIS_ORDER_MIN_NOTIONAL", "10"))  # min order value
-ORDER_MAX_SLIPPAGE_BPS = float(os.getenv("AEGIS_ORDER_MAX_SLIPPAGE_BPS", "50"))  # abort if > 0.5%
-
-# --- Binance ---
-BINANCE_TESTNET_API_KEY = _decrypt_env(os.getenv("BINANCE_TESTNET_API_KEY", ""))
-BINANCE_TESTNET_API_SECRET = _decrypt_env(os.getenv("BINANCE_TESTNET_API_SECRET", ""))
-BINANCE_SPOT_URL = os.getenv("AEGIS_BINANCE_SPOT_URL", "https://api.binance.com/api/v3")
-BINANCE_FUTURES_URL = os.getenv("AEGIS_BINANCE_FUTURES_URL", "https://fapi.binance.com/fapi/v1")
-BINANCE_TESTNET_SPOT_URL = os.getenv("AEGIS_TESTNET_SPOT_URL", "https://testnet.binance.vision/api/v3")
-BINANCE_TESTNET_FUTURES_URL = os.getenv("AEGIS_TESTNET_FUTURES_URL", "https://testnet.binancefuture.com/fapi/v1")
-BINANCE_TESTNET_SPOT_WS = os.getenv("AEGIS_TESTNET_SPOT_WS", "wss://testnet.binance.vision/ws")
-BINANCE_TESTNET_FUTURES_WS = os.getenv("AEGIS_TESTNET_FUTURES_WS", "wss://testnet.binancefuture.com/ws")
-
-# --- Free API URLs ---
-COINGECKO_URL = os.getenv("AEGIS_COINGECKO_URL", "https://api.coingecko.com/api/v3")
-DEFILLAMA_URL = os.getenv("AEGIS_DEFILLAMA_URL", "https://api.llama.fi")
-DEFILLAMA_YIELDS_URL = os.getenv("AEGIS_DEFILLAMA_YIELDS_URL", "https://yields.llama.fi")
-PERPFINDER_URL = os.getenv("AEGIS_PERPFINDER_URL", "https://api.perpfinder.com")
-MEMPOOL_URL = os.getenv("AEGIS_MEMPOOL_URL", "https://mempool.space/api")
-DEXSCREENER_URL = os.getenv("AEGIS_DEXSCREENER_URL", "https://api.dexscreener.com")
-COINPAPRIKA_URL = os.getenv("AEGIS_COINPAPRIKA_URL", "https://api.coinpaprika.com")
-FRANKFURTER_URL = os.getenv("AEGIS_FRANKFURTER_URL", "https://api.frankfurter.app")
-POLYMARKET_URL = os.getenv("AEGIS_POLYMARKET_URL", "https://gamma-api.polymarket.com")
-COINLORE_URL = os.getenv("AEGIS_COINLORE_URL", "https://api.coinlore.net")
-TERMINALFEED_URL = os.getenv("AEGIS_TERMINALFEED_URL", "https://terminalfeed.io")
-BLOCKSTREAM_URL = os.getenv("AEGIS_BLOCKSTREAM_URL", "https://blockstream.info/api")
-FEAR_GREED_URL = os.getenv("AEGIS_FEAR_GREED_URL", "https://api.alternative.me/fng/?limit=1&format=json")
-TWELVEDATA_URL = os.getenv("AEGIS_TWELVEDATA_URL", "https://api.twelvedata.com")
-YAHOO_FINANCE_URL = os.getenv("AEGIS_YAHOO_FINANCE_URL", "https://query1.finance.yahoo.com/v8/finance/chart")
-FOREX_API_URL = os.getenv("AEGIS_FOREX_API_URL", "https://open.er-api.com/v6/latest")
-FINNHUB_URL = os.getenv("AEGIS_FINNHUB_URL", "https://finnhub.io/api/v1")
-FINNHUB_API_KEY = _decrypt_env(os.getenv("FINNHUB_API_KEY", ""))
 
 # --- Telegram ---
 TELEGRAM_BOT_TOKEN = _decrypt_env(os.getenv("TELEGRAM_BOT_TOKEN", ""))
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-# --- Thread Pool ---
-FREE_API_WORKERS = int(os.getenv("AEGIS_FREE_API_WORKERS", "6"))
 
 # --- Symbols ---
 SYMBOLS = os.getenv("AEGIS_SYMBOLS", "BTCUSDT,ETHUSDT,SOLUSDT").split(",")
@@ -181,9 +144,15 @@ ICT_PRIMARY_INSTRUMENT = os.getenv("AEGIS_ICT_PRIMARY", "EURUSD")
 # --- Focused Single-Strategy Mode (Phase 1) ---
 # AEGIS is reduced to ONE trade type: Donchian Breakout on a maximum of
 # 3 symbols. All 15 modules collaborate for this single strategy.
+# FOCUSED_MODE is the legacy Donchian path. It defaults to the ICT instruments
+# now: it defaulted to PAXGUSDT/BTCUSDT/ETHUSDT, which market_data.fetch_ohlcv
+# refuses, so any default-config run raised ValueError inside the analysis task
+# instead of collecting candles. The branch itself is dead weight and goes with
+# the rest of the crypto engine, but until then it must at least ask for
+# symbols that exist.
 FOCUSED_MODE = os.getenv("AEGIS_FOCUSED_MODE", "true").lower() == "true"
 FOCUSED_STRATEGY = os.getenv("AEGIS_FOCUSED_STRATEGY", "donchian_breakout_long_flat")
-FOCUSED_SYMBOLS = os.getenv("AEGIS_FOCUSED_SYMBOLS", "PAXGUSDT,BTCUSDT,ETHUSDT").split(",")
+FOCUSED_SYMBOLS = os.getenv("AEGIS_FOCUSED_SYMBOLS", "EURUSD,GBPUSD,XAUUSD").split(",")
 if FOCUSED_SYMBOLS == [""]:
     FOCUSED_SYMBOLS = SYMBOLS
 MAX_POSITIONS = int(os.getenv("AEGIS_MAX_POSITIONS", "3"))
@@ -244,7 +213,6 @@ ALERT_RSI_OVERBOUGHT = float(os.getenv("AEGIS_ALERT_RSI_OVERBOUGHT", "75"))
 ALERT_RSI_OVERSOLD = float(os.getenv("AEGIS_ALERT_RSI_OVERSOLD", "25"))
 ALERT_VOLATILITY_SPIKE = float(os.getenv("AEGIS_ALERT_VOLATILITY_SPIKE", "0.05"))
 ALERT_POSITION_LIMIT_PCT = float(os.getenv("AEGIS_ALERT_POSITION_LIMIT_PCT", "80"))
-ALERT_FUNDING_RATE_EXTREME = float(os.getenv("AEGIS_ALERT_FUNDING_RATE_EXTREME", "0.001"))
 ALERT_HISTORY_LIMIT = int(os.getenv("AEGIS_ALERT_HISTORY_LIMIT", "500"))
 
 # --- Deployment Stage Thresholds ---

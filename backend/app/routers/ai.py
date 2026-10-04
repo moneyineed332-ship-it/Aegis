@@ -38,14 +38,3 @@ def assess_risk(symbol: Literal["EURUSD", "GBPUSD", "XAUUSD", "PAXGUSDT", "BTCUS
     return ai_analyst.assess_risk(candles, risk_data, positions)
 
 
-@router.post("/review-strategies")
-def review_strategies(_admin: None = Depends(require_admin_token)) -> dict:
-    backtests = storage.list_recent_backtests(limit=20)
-    return ai_analyst.review_strategies(backtests, {})
-
-
-@router.post("/analyze-sentiment")
-def analyze_sentiment(_admin: None = Depends(require_admin_token)) -> dict:
-    fear_greed = storage.list_fear_greed()
-    funding = storage.list_funding_rates()
-    return ai_analyst.analyze_sentiment({}, fear_greed, funding)

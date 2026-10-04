@@ -265,9 +265,6 @@ def dashboard(_admin: None = Depends(require_admin_token)) -> dict:
         "stress_test": stress_test_data,
         "correlation": correlation_data,
         "concentration": concentration_data,
-        "fear_greed": storage.list_fear_greed(limit=1),
-        "funding_rates": storage.list_funding_rates(limit=3),
-        "open_interest": storage.list_open_interest(limit=3),
         "memory": memory.summarize_episodes(storage.list_memory_episodes(limit=200)),
         "journal": _build_journal_data(),
     }

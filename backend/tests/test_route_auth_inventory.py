@@ -27,16 +27,12 @@ PUBLIC_PATHS = {
     "/api/v1/health",
     # market data: prices and candles reveal no account state
     "/api/v1/ohlcv",
-    "/api/v1/fear-greed",
-    "/api/v1/funding-rates",
-    "/api/v1/open-interest",
     "/api/v1/market-snapshots",
-    # The crypto surface is gone. /assets/*, /free/*, /binance/testnet/* and
-    # /portfolio/correlation were removed with the multi-asset engine, so the
-    # public list is short on purpose: Forex candles and the liveness probe.
-    # /api/v1/fear-greed, /funding-rates and /open-interest are still listed
-    # because routers/market.py still serves them; they go when the remaining
-    # crypto fetchers in market_data.py are stripped.
+    # The crypto surface is gone. /assets/*, /free/*, /binance/testnet/*,
+    # /portfolio/correlation and the three perp endpoints (/fear-greed,
+    # /funding-rates, /open-interest) were removed with the multi-asset engine,
+    # so the public list is short on purpose: the liveness probe and Forex
+    # candles.
 }
 # NOTE: /docs, /redoc and /openapi.json are FastAPI built-ins, not APIRoute
 # instances, so they stay outside this inventory either way. They used to be

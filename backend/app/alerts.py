@@ -25,7 +25,8 @@ class AlertManager:
             "volatility_spike": config.ALERT_VOLATILITY_SPIKE,
             "regime_change": True,
             "position_limit_pct": config.ALERT_POSITION_LIMIT_PCT,
-            "funding_rate_extreme": config.ALERT_FUNDING_RATE_EXTREME,
+            # funding_rate_extreme went with the crypto engine: perpetual funding
+            # is a Binance perp concept with no Forex equivalent.
         }
         self._last_regime: dict[str, str] = {}
 
@@ -138,22 +139,6 @@ class AlertManager:
                 "message": f"Max drawdown at {max_dd:.1f}% — exceeds {self.thresholds['max_drawdown_pct']}% limit",
                 "value": max_dd,
                 "threshold": self.thresholds["max_drawdown_pct"],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-        return None
-
-    def check_funding_rate(self, funding_data: dict) -> dict | None:
-        """Check for extreme funding rates."""
-        rate = abs(funding_data.get("funding_rate", 0))
-        if rate > self.thresholds["funding_rate_extreme"]:
-            direction = "positive (longs pay)" if funding_data["funding_rate"] > 0 else "negative (shorts pay)"
-            return {
-                "type": "funding_rate_extreme",
-                "severity": "warning",
-                "message": f"Extreme funding rate: {funding_data['funding_rate']*100:.4f}% {direction}",
-                "value": funding_data["funding_rate"],
-                "threshold": self.thresholds["funding_rate_extreme"],
-                "symbol": funding_data.get("symbol"),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         return None

@@ -270,39 +270,6 @@ class TestEquityCurve:
         assert curve[-1]["equity"] == 10000
 
 
-class TestFearGreed:
-    def test_save_and_list(self):
-        data = {"value": 25, "classification": "Fear", "source": "test", "collected_at": "2025-01-01"}
-        storage.save_fear_greed(data)
-        result = storage.list_fear_greed()
-        assert len(result) == 1
-        assert result[0]["value"] == 25
-
-
-class TestFundingRates:
-    def test_save_and_list(self):
-        data = {"symbol": "BTCUSDT", "mark_price": 50000, "index_price": 49990,
-                "funding_rate": 0.0001, "next_funding_time": 1000, "source": "test", "collected_at": "2025-01-01"}
-        storage.save_funding_rate(data)
-        result = storage.list_funding_rates("BTCUSDT")
-        assert len(result) == 1
-
-    def test_list_all(self):
-        data = {"symbol": "BTCUSDT", "mark_price": 50000, "index_price": 49990,
-                "funding_rate": 0.0001, "next_funding_time": 1000, "source": "test", "collected_at": "2025-01-01"}
-        storage.save_funding_rate(data)
-        assert len(storage.list_funding_rates()) == 1
-
-
-class TestOpenInterest:
-    def test_save_and_list(self):
-        data = {"symbol": "BTCUSDT", "open_interest": 1000, "open_interest_usd": 50000000,
-                "price": 50000, "source": "test", "collected_at": "2025-01-01"}
-        storage.save_open_interest(data)
-        result = storage.list_open_interest("BTCUSDT")
-        assert len(result) == 1
-
-
 class TestMemoryEpisodes:
     def test_save_and_list(self):
         result = storage.save_memory_episode("BTCUSDT", "sma", {"rsi": 50}, {"pnl": 0.05}, "fp123")

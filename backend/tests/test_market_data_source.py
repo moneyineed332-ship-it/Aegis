@@ -135,15 +135,32 @@ class TestWorkingMTSuppressesFallback:
         yahoo.assert_not_called()
 
 
-class TestForexNeverFallsBackToBinance:
-    """Binance lists no EURUSD/GBPUSD/XAUUSD, so it is not a Forex fallback."""
+class TestForexNeverFallsBackToCrypto:
+    """There is no crypto data path left to fall back to.
 
-    def test_binance_fallback_is_not_used_for_forex(self):
+    This used to patch market_data._fetch_ohlcv_fallback and assert it was never
+    called for a Forex symbol, which caught the live bug where a dead MT5 sent
+    EURUSD to Binance and got an empty list. That function no longer exists, so
+    there is nothing left to call: fetch_ohlcv refuses any symbol outside
+    FOREX_SYMBOLS before it reaches any source at all.
+
+    Asserting the absence rather than mocking it means a future edit that
+    reintroduces a second data source has to come back here first.
+    """
+
+    def test_the_crypto_fallbacks_are_gone(self):
+        assert not hasattr(market_data, "_fetch_ohlcv_fallback")
+        assert not hasattr(market_data, "_get_exchange")
+        assert not hasattr(market_data, "_to_ccxt_symbol")
+
+    def test_a_crypto_symbol_is_refused_rather_than_routed(self):
+        with pytest.raises(ValueError, match="not a Forex instrument"):
+            market_data.fetch_ohlcv("BTCUSDT", "1h", 60)
+
+    def test_the_forex_path_still_reaches_yahoo(self):
         with patch.object(market_data, "_get_mt5_connector", return_value=_DeadConnector()), \
-             patch.object(market_data, "_fetch_ohlcv_fallback") as binance, \
              patch.object(market_data, "_fetch_ohlcv_yahoo", return_value=_yahoo_candles()):
-            market_data._fetch_ohlcv_mt5("XAUUSD", "1h", 60)
-        binance.assert_not_called()
+            assert market_data.fetch_ohlcv("XAUUSD", "1h", 60)
 
 
 class TestEveryForexSymbolAndInterval:

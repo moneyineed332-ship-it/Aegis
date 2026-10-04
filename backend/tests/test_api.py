@@ -36,9 +36,6 @@ def test_dashboard(admin_headers):
     assert "recent_backtests" in data
     assert "data_quality" in data
     assert "strategy_registry" in data
-    assert "fear_greed" in data
-    assert "funding_rates" in data
-    assert "open_interest" in data
     assert "memory" in data
     assert "journal" in data
     assert "stress_test" in data
@@ -245,43 +242,6 @@ def test_supervisor_status(admin_headers):
 
 
 # === Fear & Greed ===
-
-def test_fear_greed(admin_headers):
-    r = client.get("/api/v1/fear-greed", headers=admin_headers)
-    assert r.status_code == 200
-    assert isinstance(r.json(), list)
-
-
-def test_refresh_fear_greed(admin_headers):
-    r = client.post("/api/v1/fear-greed/refresh", headers=admin_headers)
-    assert r.status_code in (200, 201, 502)
-
-
-# === Funding Rates ===
-
-def test_funding_rates(admin_headers):
-    r = client.get("/api/v1/funding-rates", headers=admin_headers)
-    assert r.status_code == 200
-
-
-def test_refresh_funding_rates(admin_headers):
-    r = client.post("/api/v1/funding-rates/refresh", headers=admin_headers)
-    assert r.status_code in (200, 201, 502)
-
-
-# === Open Interest ===
-
-def test_open_interest(admin_headers):
-    r = client.get("/api/v1/open-interest", headers=admin_headers)
-    assert r.status_code == 200
-
-
-def test_refresh_open_interest(admin_headers):
-    r = client.post("/api/v1/open-interest/refresh", headers=admin_headers)
-    assert r.status_code in (200, 201, 502)
-
-
-# === Memory ===
 
 def test_memory_list(admin_headers):
     r = client.get("/api/v1/memory", headers=admin_headers)
@@ -716,9 +676,6 @@ if False:  # Manual __main__ runner disabled — use pytest instead
         test_strategies,
         test_coach_review, test_lab_promotions,
         test_supervisor_status,
-        test_fear_greed, test_refresh_fear_greed,
-        test_funding_rates, test_refresh_funding_rates,
-        test_open_interest, test_refresh_open_interest,
         test_memory_list, test_memory_remember, test_memory_compare,
         test_journal_analysis, test_journal_outcomes,
         test_sma_backtest, test_sma_walk_forward,
@@ -747,5 +704,6 @@ if False:  # Manual __main__ runner disabled — use pytest instead
             print(f"  FAIL: {test.__name__} — {e}")
     print(f"\n{'='*50}")
     print(f"Results: {passed} passed, {failed} failed, {passed+failed} total")
+
 
 

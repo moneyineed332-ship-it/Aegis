@@ -80,10 +80,8 @@ def encrypt_env_file(filepath: str, key: str) -> int:
 
             if var_name in (
                 "AEGIS_ADMIN_TOKEN", "VITE_ADMIN_TOKEN",
-                "BINANCE_TESTNET_API_KEY", "BINANCE_TESTNET_API_SECRET",
                 "OPENCODE_API_KEY", "OPENROUTER_API_KEY",
-                "FINNHUB_API_KEY", "TELEGRAM_BOT_TOKEN",
-                "LIVE_API_KEY", "LIVE_API_SECRET",
+                "TELEGRAM_BOT_TOKEN",
             ) and value:
                 encrypted = encrypt_value(value, key)
                 new_lines.append(f'{var_name}="{encrypted}"\n')

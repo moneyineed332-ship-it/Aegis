@@ -104,20 +104,20 @@ def _flat(n=40):
 
 def test_signal_ranking_picks_strongest_breakout_not_last_symbol():
     """Regression for the phase-1 bug: the ranking loop used only the LAST
-    iterated symbol. A strong breakout on PAXGUSDT must win even though it is
-    iterated first (PAXGUSDT, BTCUSDT, ETHUSDT)."""
+    iterated symbol. A strong breakout on EURUSD must win even though it is
+    iterated first (EURUSD, GBPUSD, XAUUSD)."""
     _inject_analyses()
 
     with patch.object(engine.storage, "list_ohlcv_candles", return_value=_flat(40)) as mock_candles, \
          patch.object(engine.backtesting, "donchian_live_signal", return_value={
-             "action": "buy", "confidence": 0.9, "reason": "PAXG breakout",
+             "action": "buy", "confidence": 0.9, "reason": "EURUSD breakout",
              "channel_high": 106, "channel_low": 94,
          }):
-        # Only PAXGUSDT has the widened candles that trigger the Donchian cut.
+        # Only EURUSD has the widened candles that trigger the Donchian cut.
         # The mock returns the same list, so gate the breakout by symbol.
         def _fill(symbol, interval, limit):
             candles = [dict(c) for c in _flat(40)]
-            if symbol != "PAXGUSDT":
+            if symbol != "EURUSD":
                 candles[-1]["high"] = 100.2  # inside channel -> no breakout
             return candles
 
@@ -128,7 +128,7 @@ def test_signal_ranking_picks_strongest_breakout_not_last_symbol():
         asyncio.run(_run())
 
     assert engine._last_signal is not None
-    assert engine._last_signal["symbol"] == "PAXGUSDT"
+    assert engine._last_signal["symbol"] == "EURUSD"
     assert engine._last_signal["recommendation"]["action"] == "buy"
     assert engine._last_signal["recommendation"]["strategy"] == "donchian_breakout_long_flat"
 
@@ -136,7 +136,7 @@ def test_signal_ranking_picks_strongest_breakout_not_last_symbol():
 def test_signal_generation_without_breakout_does_not_trade():
     """No breakout on any symbol -> the executed signal must not be buy/sell."""
     _inject_analyses()
-    engine._last_analysis = {"symbol": "BTCUSDT", "regime": dict(_BULL)}
+    engine._last_analysis = {"symbol": "GBPUSD", "regime": dict(_BULL)}
 
     with patch.object(engine.storage, "list_ohlcv_candles", return_value=_flat(40)), \
          patch.object(engine.backtesting, "donchian_live_signal", return_value={
@@ -151,13 +151,13 @@ def test_signal_generation_without_breakout_does_not_trade():
 
 
 def test_execute_trades_opens_paper_order_on_donchian_buy():
-    engine._last_prices = {"PAXGUSDT": 100.0}
+    engine._last_prices = {"EURUSD": 100.0}
     engine._last_signal = {
-        "symbol": "PAXGUSDT",
+        "symbol": "EURUSD",
         "regime": dict(_BULL),
         "recommendation": {
             "action": "buy", "strategy": "donchian_breakout_long_flat",
-            "confidence": 0.9, "reason": "PAXG breakout (research)",
+            "confidence": 0.9, "reason": "EURUSD breakout (research)",
         },
     }
 
@@ -177,24 +177,24 @@ def test_execute_trades_opens_paper_order_on_donchian_buy():
             await engine.task_execute_trades()
         asyncio.run(_run())
 
-    assert submitted["symbol"] == "PAXGUSDT"
+    assert submitted["symbol"] == "EURUSD"
     assert submitted["side"] == "buy"
     assert submitted["strategy"] == "donchian_breakout_long_flat"
 
 
 def test_execute_trades_respects_max_positions_gate():
-    engine._last_prices = {"PAXGUSDT": 100.0}
+    engine._last_prices = {"EURUSD": 100.0}
     engine._last_signal = {
-        "symbol": "PAXGUSDT",
+        "symbol": "EURUSD",
         "regime": dict(_BULL),
         "recommendation": {
             "action": "buy", "strategy": "donchian_breakout_long_flat",
-            "confidence": 0.9, "reason": "PAXG breakout (research)",
+            "confidence": 0.9, "reason": "EURUSD breakout (research)",
         },
     }
     open_positions = [
         {"symbol": s, "quantity": 0.01, "average_price": 100.0}
-        for s in ("DOGEUSDT", "LTCUSDT", "XRPUSDT")  # other assets, so PAXG has no current position
+        for s in ("USDJPY", "AUDUSD", "NZDUSD")  # other assets, so EURUSD has no current position
     ]
 
     submitted = {}
@@ -219,13 +219,13 @@ def test_execute_trades_respects_max_positions_gate():
 
 
 def test_execute_trades_closes_existing_position_on_donchian_sell():
-    engine._last_prices = {"PAXGUSDT": 105.0}
+    engine._last_prices = {"EURUSD": 105.0}
     engine._last_signal = {
-        "symbol": "PAXGUSDT",
+        "symbol": "EURUSD",
         "regime": dict(_BULL),
         "recommendation": {
             "action": "sell", "strategy": "donchian_breakout_long_flat",
-            "confidence": 0.85, "reason": "PAXG channel drop (research)",
+            "confidence": 0.85, "reason": "EURUSD channel drop (research)",
         },
     }
 
@@ -236,7 +236,7 @@ def test_execute_trades_closes_existing_position_on_donchian_sell():
         return {"status": "filled", "fill_price": kwargs["current_price"], "mode": "paper", "order_id": "o-focus-sell-1"}
 
     with patch.object(engine.storage, "list_positions", return_value=[
-            {"symbol": "PAXGUSDT", "quantity": 0.05, "average_price": 100.0},
+            {"symbol": "EURUSD", "quantity": 0.05, "average_price": 100.0},
         ]), \
          patch.object(engine.oms.oms, "submit_market_order", side_effect=_fake_submit), \
          patch.object(engine.learning, "record_trade_exit"), \
@@ -246,6 +246,9 @@ def test_execute_trades_closes_existing_position_on_donchian_sell():
             await engine.task_execute_trades()
         asyncio.run(_run())
 
-    assert submitted["symbol"] == "PAXGUSDT"
+    assert submitted["symbol"] == "EURUSD"
     assert submitted["side"] == "sell"
     assert submitted["quantity"] == 0.05
+
+
+

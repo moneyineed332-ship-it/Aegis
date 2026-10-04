@@ -174,36 +174,6 @@ def initialize() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_system_alerts_created ON system_alerts(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_system_alerts_severity ON system_alerts(severity);
-            CREATE TABLE IF NOT EXISTS fear_greed (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                value INTEGER NOT NULL,
-                classification TEXT NOT NULL,
-                source TEXT NOT NULL,
-                collected_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS funding_rates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT NOT NULL,
-                mark_price REAL NOT NULL,
-                index_price REAL NOT NULL,
-                funding_rate REAL NOT NULL,
-                next_funding_time INTEGER NOT NULL,
-                source TEXT NOT NULL,
-                collected_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_funding_rates_symbol_collected_at
-                ON funding_rates(symbol, collected_at DESC);
-            CREATE TABLE IF NOT EXISTS open_interest (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT NOT NULL,
-                open_interest REAL NOT NULL,
-                open_interest_usd REAL NOT NULL,
-                price REAL NOT NULL,
-                source TEXT NOT NULL,
-                collected_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_open_interest_symbol_collected_at
-                ON open_interest(symbol, collected_at DESC);
             CREATE TABLE IF NOT EXISTS memory_episodes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL,
@@ -755,58 +725,6 @@ def _equity_curve_from_logs(initial_capital: float) -> list[dict]:
         return [{"time": datetime.now(timezone.utc).isoformat(), "equity": round(initial_capital, 2)}]
 
     return curve[-50:]
-
-
-def save_fear_greed(data: dict) -> dict:
-    with connection() as database:
-        database.execute(
-            "INSERT INTO fear_greed (value, classification, source, collected_at) VALUES (:value, :classification, :source, :collected_at)",
-            data,
-        )
-    return data
-
-
-def list_fear_greed(limit: int = 30) -> list[dict]:
-    with connection() as database:
-        return [dict(row) for row in database.execute("SELECT * FROM fear_greed ORDER BY id DESC LIMIT ?", (limit,))]
-
-
-def save_funding_rate(data: dict) -> dict:
-    with connection() as database:
-        database.execute(
-            """INSERT INTO funding_rates (symbol, mark_price, index_price, funding_rate, next_funding_time, source, collected_at)
-            VALUES (:symbol, :mark_price, :index_price, :funding_rate, :next_funding_time, :source, :collected_at)""",
-            data,
-        )
-    return data
-
-
-def list_funding_rates(symbol: str | None = None, limit: int = 30) -> list[dict]:
-    with connection() as database:
-        if symbol:
-            return [dict(row) for row in database.execute(
-                "SELECT * FROM funding_rates WHERE symbol = ? ORDER BY id DESC LIMIT ?", (symbol, limit)
-            )]
-        return [dict(row) for row in database.execute("SELECT * FROM funding_rates ORDER BY id DESC LIMIT ?", (limit,))]
-
-
-def save_open_interest(data: dict) -> dict:
-    with connection() as database:
-        database.execute(
-            """INSERT INTO open_interest (symbol, open_interest, open_interest_usd, price, source, collected_at)
-            VALUES (:symbol, :open_interest, :open_interest_usd, :price, :source, :collected_at)""",
-            data,
-        )
-    return data
-
-
-def list_open_interest(symbol: str | None = None, limit: int = 30) -> list[dict]:
-    with connection() as database:
-        if symbol:
-            return [dict(row) for row in database.execute(
-                "SELECT * FROM open_interest WHERE symbol = ? ORDER BY id DESC LIMIT ?", (symbol, limit)
-            )]
-        return [dict(row) for row in database.execute("SELECT * FROM open_interest ORDER BY id DESC LIMIT ?", (limit,))]
 
 
 def save_memory_episode(symbol: str, strategy: str, features: dict, result: dict | None, fingerprint: str) -> dict:
