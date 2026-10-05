@@ -415,7 +415,7 @@ def focus_status(_admin: None = Depends(require_admin_token)) -> dict:
     symbols = (
         config.FOCUSED_SYMBOLS
         if config.FOCUSED_MODE
-        else (config.ICT_SYMBOLS if ict_mode else config.SYMBOLS)
+        else config.ICT_SYMBOLS
     )
     strategy = config.FOCUSED_STRATEGY if config.FOCUSED_MODE else "ict_smc"
     return {

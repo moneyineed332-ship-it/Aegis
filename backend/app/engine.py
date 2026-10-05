@@ -639,7 +639,7 @@ async def task_generate_signals():
             }
         else:
             # Fallback: use last analyzed symbol
-            symbol = _last_analysis.get("symbol", config.SYMBOLS[0])
+            symbol = _last_analysis.get("symbol", config.ICT_SYMBOLS[0])
             signal = {
                 "symbol": symbol,
                 "regime": _last_analysis.get("regime", {}),
@@ -1490,3 +1490,4 @@ def get_engine_status() -> dict:
 # in that pass shares a cycle id. Wired at the end of the module because
 # _begin_cycle has to exist first.
 scheduler.on_dispatch = _begin_cycle
+

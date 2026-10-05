@@ -134,7 +134,12 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 
 # --- Symbols ---
-SYMBOLS = os.getenv("AEGIS_SYMBOLS", "BTCUSDT,ETHUSDT,SOLUSDT").split(",")
+# Was BTCUSDT,ETHUSDT,SOLUSDT. Three sites still read SYMBOLS as "the universe"
+# (engine's signal fallback, learning's memory consolidation, and market_data's
+# final fallback in the resolution chain), so leaving a crypto default here meant
+# each of them defaulted to a symbol that can no longer be fetched. The ICT
+# instruments are the real universe now; AEGIS_ICT_SYMBOLS is the variable to set.
+SYMBOLS = os.getenv("AEGIS_SYMBOLS", "EURUSD,GBPUSD,XAUUSD").split(",")
 
 # --- ICT/SMC Bot Configuration (Forex Instruments) ---
 # Configuration spécifique pour le bot ICT/SMC avec instruments Forex

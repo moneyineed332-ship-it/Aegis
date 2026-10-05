@@ -60,7 +60,11 @@ def get_stress_test(symbol: str = "EURUSD") -> dict:
 @router.get("/risk/correlation")
 def get_correlation() -> dict:
     assets: dict[str, list[float]] = {}
-    for sym in config.SYMBOLS:
+    # Was config.SYMBOLS, which defaults to BTCUSDT/ETHUSDT/SOLUSDT. On a Forex
+    # book that finds no candles for any of them and the endpoint answers 404,
+    # so the correlation matrix was unreachable. The universe is the ICT
+    # instruments.
+    for sym in config.ICT_SYMBOLS:
         candles = storage.list_ohlcv_candles(sym, "1h", limit=200)
         if candles:
             assets[sym] = [c["close"] for c in candles]

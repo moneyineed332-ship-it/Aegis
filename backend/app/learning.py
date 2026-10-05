@@ -435,7 +435,7 @@ def learning_cycle(last_analysis: dict | None, last_signal: dict | None) -> dict
     # 3. Consolidate memory for active symbols
     from . import config
     total_patterns = 0
-    for symbol in config.SYMBOLS:
+    for symbol in config.ICT_SYMBOLS:
         consolidation = consolidate_memory(symbol)
         total_patterns += len(consolidation.get("patterns", []))
     results["patterns_found"] = total_patterns
@@ -450,3 +450,4 @@ def learning_cycle(last_analysis: dict | None, last_signal: dict | None) -> dict
             results["strategy_weights"] = weights
 
     return results
+

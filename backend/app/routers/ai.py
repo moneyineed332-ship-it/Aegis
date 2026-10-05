@@ -16,7 +16,7 @@ def get_ai_status() -> dict:
 
 
 @router.post("/analyze-market")
-def analyze_market(symbol: Literal["EURUSD", "GBPUSD", "XAUUSD", "PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "EURUSD", interval: Literal["5m", "15m", "1h", "4h"] = "1h", _admin: None = Depends(require_admin_token)) -> dict:
+def analyze_market(symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD", interval: Literal["5m", "15m", "1h", "4h"] = "1h", _admin: None = Depends(require_admin_token)) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=500)
     if not candles:
         raise HTTPException(status_code=404, detail="No candle data available.")
@@ -28,7 +28,7 @@ def analyze_market(symbol: Literal["EURUSD", "GBPUSD", "XAUUSD", "PAXGUSDT", "BT
 
 
 @router.post("/assess-risk")
-def assess_risk(symbol: Literal["EURUSD", "GBPUSD", "XAUUSD", "PAXGUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] = "EURUSD", interval: Literal["5m", "15m", "1h", "4h"] = "1h", _admin: None = Depends(require_admin_token)) -> dict:
+def assess_risk(symbol: Literal["EURUSD", "GBPUSD", "XAUUSD"] = "EURUSD", interval: Literal["5m", "15m", "1h", "4h"] = "1h", _admin: None = Depends(require_admin_token)) -> dict:
     candles = storage.list_ohlcv_candles(symbol, interval, limit=500)
     if not candles:
         raise HTTPException(status_code=404, detail="No candle data available.")
@@ -36,5 +36,6 @@ def assess_risk(symbol: Literal["EURUSD", "GBPUSD", "XAUUSD", "PAXGUSDT", "BTCUS
     risk_data = risk.historical_risk(candles, capital)
     positions = storage.list_positions()
     return ai_analyst.assess_risk(candles, risk_data, positions)
+
 
 

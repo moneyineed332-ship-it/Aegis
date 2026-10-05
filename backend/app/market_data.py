@@ -183,13 +183,15 @@ def _fetch_forex_spot_yahoo(symbol: str, collected_at: str) -> dict | None:
     except (TypeError, ValueError):
         return None
 
-# Focused mode: price collection restricted to the focused universe.
-if config.ICT_MODE and hasattr(config, 'ICT_SYMBOLS'):
-    SYMBOLS = tuple(config.ICT_SYMBOLS)
-elif config.FOCUSED_MODE:
+# Price collection universe. Every branch now resolves to a Forex list: the
+# focused list defaults to the ICT instruments too, and the last fallback was
+# config.SYMBOLS, whose default was a crypto triple. fetch_ohlcv refuses
+# anything outside FOREX_SYMBOLS, so a crypto entry here would raise rather than
+# quietly return nothing.
+if config.FOCUSED_MODE and not config.ICT_MODE:
     SYMBOLS = tuple(config.FOCUSED_SYMBOLS)
 else:
-    SYMBOLS = tuple(config.SYMBOLS)
+    SYMBOLS = tuple(config.ICT_SYMBOLS)
 
 
 def _is_forex_symbol(symbol: str) -> bool:
