@@ -2,6 +2,54 @@
 
 Historique des modifications du projet AEGIS AI Quant.
 
+## [Non publié] — Passage à un bot ICT/SMC Forex unique sur MT5
+
+Changement de périmètre : le bot ne fait plus de crypto. Il ne reste que le
+moteur ICT/SMC Forex, et l'objectif n'est plus le paper mais un bot réel branché
+sur un compte **démo MT5**, avec pour cible un compte réel plus tard.
+
+### Retiré
+
+- Modules et routes crypto : Binance testnet, multi-asset, corrélation
+  multi-actifs, collecteurs free-API (CoinGecko, DeFiLlama, PerpFinder,
+  Mempool, DexScreener, Polymarket, Blockstream, Fear & Greed).
+- Stratégies crypto : grid, mean-reversion, scalping, swing, intraday, plus
+  `backtesting_advanced` (walk-forward-optimize, Monte Carlo, sensibilité).
+  Une grille et du scalping n'ont pas d'équivalent Forex : ils ont besoin d'un
+  marché qui ne ferme jamais et ne paie jamais de swap.
+- Exchange adapter CCXT/Binance, réduit à ses deux exceptions.
+- Quatre sections du dashboard qui appelaient des routes supprimées.
+- ~7 200 lignes au total, 138 routes devenues 118.
+
+`smc_ict.py` et `multi_timeframe.py` ont été **conservés** : ce sont du SMC, pas
+du crypto, et le supprimer tuerait le pipeline ICT silencieusement
+(`engine.py:480` bloque sur `_last_smc_analysis`, rempli uniquement par
+`smc_ict.analyze` quand `FOCUSED_MODE` est faux).
+
+### Corrigé au passage
+
+- `market_data.fetch_ohlcv` **lève** sur un symbole non-Forex au lieu de
+  router ailleurs. Renvoyer une liste vide faisait lire « pas de signal » par le
+  moteur au lieu de « instrument mal configuré ».
+- `get_live_exchange()` **lève** au lieu de retourner un venue. Les branches
+  live d'`oms.py` auraient sinon trouvé un venue CCXT fonctionnel sur toute
+  machine ayant `ccxt` installé.
+- Le stress test du dashboard somrait l'exposition `symbol == "BTCUSDT"`, donc
+  toujours zéro sur un book Forex. Il somme maintenant toutes les positions.
+- `config.SYMBOLS` valait `BTCUSDT,ETHUSDT,SOLUSDT` et three sites le lisaient
+  comme l'univers. `/api/v1/risk/correlation` renvoyait 404 sur un book Forex.
+- `strategy_registry.is_active()` renvoyait `True` pour les dix stratégies
+  enregistrées sous la config `fly.toml`, dont cinq sans code derrière.
+- Le seuil de sécurité des docs FastAPI : `/docs`, `/redoc` et
+  `/openapi.json` servaient la carte complète des routes admin sans token.
+  Fermés par défaut, contrat récupérable via `python -m app.export_openapi`.
+
+### Documentation
+
+- Le README annonçait `app/presets.py` (cinq presets) et
+  `lock_position_size()`. Ni l'un ni l'autre n'a jamais existé. Les seuils réels
+  sont documentés à leur emplacement réel.
+
 ## [Version 1.0] - 2025-01-XX
 
 ### Nouveautés

@@ -47,10 +47,9 @@ AEGIS AI Quant/
 │   │   ├── trade_journal.py        # Journal des trades
 │   │   ├── ict_backtester.py       # Moteur de backtesting
 │   │   ├── indicators.py           # ICT/SMC indicators
-│   │   ├── mt5_connector.py        # Connecteur MT5
-│   │   ├── market_data.py          # Données de marché
+│   │   ├── mt5_connector.py        # Connecteur MT5 (lecture seule)
+│   │   ├── market_data.py          # Données de marché (MT5, fallback Yahoo)
 │   │   ├── storage.py              # Persistance SQLite
-│   │   ├── presets.py              # Presets de configuration
 │   │   └── routers/
 │   │       └── ict_dashboard.py    # API REST Dashboard
 │   ├── test_ict_validation.py      # Validation des modules
@@ -138,13 +137,22 @@ MT5_SERVER=your_mt5_server
 
 ### Presets de Configuration
 
-Disponibles dans `app/presets.py`:
+**Aucun fichier de presets n'existe.** La documentation en mentionnait cinq
+(`presets.py`) et ce module n'a jamais été créé ; toute la configuration est
+dans `app/ict_config.py`, par instrument :
 
-- **Conservative**: 0.3% risque, 2:1 min RR, très sélectif
-- **Moderate**: 0.5% risque, 1.5:1 min RR, équilibré (recommandé)
-- **Aggressive**: 1.0% risque, 1.2:1 min RR, plus de trades
-- **Scalping**: 0.2% risque, trades fréquents, timeframes courts
-- **Gold Conservative**: Spécifique XAU/USD
+| Paramètre | Où | Valeur par défaut |
+|---|---|---|
+| Risque par trade | `INSTRUMENT_CONFIGS[risk_per_trade]` | 0,5 % |
+| RR minimum | `INSTRUMENT_CONFIGS[min_rr_ratio]` | 1,50 |
+| Capital | `config.ICT_PAPER_CAPITAL` | 50 € |
+| Micro-contrats | `config.ICT_MICRO_CONTRACTS` | 1 |
+| Positions simultanées | `limits.max_simultaneous_positions` | 3 |
+| Sessions actives | `DEFAULT_ENABLED_SESSIONS` | London, New York, Overlap |
+
+Les seuils réels qui bloquent un trade sont vérifiables dans
+`app/ict_risk_manager.py`, et non dans un preset. Un preset ajouté ici serait
+dupliqué : `check_all_limits` lit directement `ict_config`.
 
 ---
 
@@ -156,12 +164,22 @@ Disponibles dans `app/presets.py`:
 cd backend
 python test_ict_validation.py
 ```
-
 Résultat attendu:
+
 ```
 SUMMARY: 8/8 tests passed
 [OK] All ICT/SMC modules validated successfully!
 ```
+
+**Ce que ce test ne fait pas.** `test_ict_validation.py` importe chaque module
+ICT/SMC et vérifie qu'une clé existe dans le dictionnaire retourné — par exemple
+`assert "trend" in market_structure(candles)`. Il ne vérifie **aucune valeur**. Le
+message « All ICT/SMC modules validated successfully » est donc plus fort que ce
+qui a été mesuré.
+
+La couverture qui compte est `cd backend && python -m pytest -q`, qui vérifie
+les comportements. Le test de validation reste utile comme smoke test
+d'importabilité.
 
 ### 2. Test d'Intégration
 
@@ -236,7 +254,10 @@ Gestion de risque centralisée - **ne peut être contourné**.
 - `check_all_limits()` - Validation complète avant trade
 - `register_trade_entry()` - Enregistrement ouverture
 - `register_trade_exit()` - Enregistrement fermeture
-- `lock_position_size()` - Verrouillage taille après pertes
+- Anti-martingale via `_consecutive_losses` : au-delà de
+  `limits.max_consecutive_losses` consécutifs, tout trade est refusé. Il n'y a
+  pas de fonction `lock_position_size()` ; ce nom venait de la doc et n'a
+  jamais existé.
 
 ### 4. Position Manager (`position_manager.py`)
 

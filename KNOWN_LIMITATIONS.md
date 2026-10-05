@@ -8,6 +8,26 @@ perform. An earlier `AUDIT_REPORT.md` concluded "AUDIT RESULT: PASSED"; several
 of the items below were live at the time. A green field on a screen should mean
 "this check ran and passed", not "nothing was asked".
 
+## Scope
+
+One strategy engine: ICT/SMC Forex on EURUSD, GBPUSD and XAUUSD, fed by
+MetaTrader5 with a Yahoo Finance fallback for hosts where MT5 cannot run. The
+crypto engine is gone. Intended deployment is a **single** machine (see 2).
+
+Two things about that target are not built yet and are the reason this file
+still matters:
+
+- **MT5 is Windows-only and requires an open terminal.** The `MetaTrader5`
+  Python package has no Linux build, so the execution path cannot run on Fly.
+  The bot must run on a Windows host, always on.
+- **There is no order execution at all.** `mt5_connector.py` is read-only:
+  `fetch_ohlcv`, `fetch_tick`, `get_symbol_info`, no `order_send` anywhere in the
+  repository. `position_manager.open_position()` logs "Position opened" and
+  returns a `PositionUpdate`; it simulates. `get_live_exchange()` now raises
+  deliberately, so any request for live execution stops at that boundary with a
+  message rather than finding a stray venue. Until the MT5 adapter exists, every
+  order goes through the paper path in `oms.py`.
+
 ---
 
 ## 1. No economic-news protection
@@ -46,9 +66,14 @@ to change.
 
 ## 2. Single-instance state
 
-Engine state lives in SQLite on a Fly volume. With more than one machine, each
-keeps its own in-memory copy and they overwrite each other. Deploy a single
-machine, or move the engine state behind a shared store.
+Engine state lives in SQLite. With more than one machine, each keeps its own
+in-memory copy and they overwrite each other. Deploy a single machine, or move
+the engine state behind a shared store.
+
+This is now a deployment constraint rather than a preference. MT5 is Windows-only
+(see Scope), the bot has to stay up, and scaling out would need the state moved
+first. A Windows VPS is the shape that fits: one machine, one terminal, one
+account.
 
 ## 3. Sharpe figures need their scale read alongside them
 
@@ -151,6 +176,24 @@ cost of ignoring genuinely unmatched requests. A hard cap on distinct paths,
 above which new ones are not labelled, bounds the growth in half a dozen lines
 and keeps scraping healthy without changing what the existing routes report.
 
+## 6. The legacy Donchian branch is still in the engine
+
+`config.FOCUSED_MODE` defaults to true and selects a Donchian path in
+`engine.py` that belongs to the removed crypto engine. It is not inert:
+
+- `smc_ict.analyze()` is skipped on that branch, and `engine.py:480` gates the
+  whole ICT pipeline on `_last_smc_analysis` being non-empty. So a run with
+  `FOCUSED_MODE=true` and `ICT_MODE=false` never reaches
+  `_init_ict_pipeline()`. The production `fly.toml` sets `ICT_MODE=true` and
+  `FOCUSED_MODE=false`, which is why this has not bitten yet.
+- Its default symbol list is now the ICT instruments, because the previous
+  default was `PAXGUSDT,BTCUSDT,ETHUSDT` and `fetch_ohlcv` now refuses those,
+  so any default-config run raised `ValueError` inside the analysis task.
+
+It should be deleted rather than left as a trap. It was not done here because
+`engine.py` is the most load-bearing file in the repository and the removal wants
+the ICT pipeline tests read first.
+
 ---
 
 ## What *is* covered
@@ -179,3 +222,6 @@ each with a test pinning it:
 | Modes B, C and D selectable | `ict_dashboard.set_position_mode` |
 | `can_trade` reflects a real check | `IctRiskManager.check_account_limits` |
 | Dev server cannot reach production | `api.ts` dev guard |
+| A non-Forex symbol cannot reach a data source | `market_data.fetch_ohlcv` raises |
+| Live execution cannot silently find a venue | `exchange.get_live_exchange` raises |
+| Tests do not depend on the trading calendar | `tests/conftest.py` pins the session clock |
