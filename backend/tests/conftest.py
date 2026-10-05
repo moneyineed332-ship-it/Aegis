@@ -2,6 +2,7 @@
 
 import os
 import sys
+from datetime import datetime, timezone
 import tempfile
 
 import pytest
@@ -42,6 +43,42 @@ def _isolated_db(tmp_path, monkeypatch):
     regime_mod._HYSTERESIS.clear()
     regime_mod._prev_regime = None
     regime_mod._prev_confidence = 0.0
+
+    # Pin the trading-session clock for every test.
+    #
+    # The risk manager's session gate reads a wall clock unless a `now` is
+    # passed, and trading hours are 08:00-22:00 UTC. Three tests that assert
+    # can_trade is True therefore only passed inside that window; at 22:50 UTC
+    # they failed with "Hors session (prochaine dans 579min)" while nothing was
+    # broken. Two of them now pass `now` explicitly, but 29 other calls across
+    # the ICT suites do not, and any of them would become flaky the moment an
+    # assertion changed to True.
+    #
+    # Injecting the time here rather than at 29 call sites keeps one place to
+    # change, and the real session logic still runs: only the hour is fixed. A
+    # test that needs a specific session passes `now` itself, which wins.
+    #
+    # INSIDE_LONDON is a Thursday at 10:00 UTC, inside london (08:00-17:00) and
+    # inside new_york (13:00-22:00 is not yet open, but london alone satisfies
+    # DEFAULT_ENABLED_SESSIONS).
+    import app.ict_risk_manager as risk_manager_mod
+
+    inside_session = datetime(2026, 1, 15, 10, 0, tzinfo=timezone.utc)
+
+    # Wrap the module-level names the risk manager calls, so a None `now`
+    # anywhere inside it becomes the pinned hour.
+    _real_allowed = risk_manager_mod.is_trading_allowed
+    _real_status = risk_manager_mod.get_session_status
+
+    def _allowed(instrument, now=None):
+        return _real_allowed(instrument, now=now if now is not None else inside_session)
+
+    def _status(instrument, now=None):
+        return _real_status(instrument, now=now if now is not None else inside_session)
+
+    monkeypatch.setattr(risk_manager_mod, "is_trading_allowed", _allowed)
+    monkeypatch.setattr(risk_manager_mod, "get_session_status", _status)
+
     yield
     # Cleanup: close connection and remove temp DB
     if storage._db_connection:
