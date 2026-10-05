@@ -3,14 +3,10 @@ import {
   Activity,
   Brain,
   Cpu,
-  Database,
-  FlaskConical,
-  Globe,
   Layers,
   Shield,
   Target,
   Wallet,
-  Wifi,
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
@@ -42,22 +38,21 @@ const navSections = [
   { id: "positions", label: "Positions", icon: TrendingUp, group: "main" },
   { id: "regime", label: "Régime ML", icon: Cpu, group: "analysis" },
   { id: "ai", label: "Analyste IA", icon: Brain, group: "analysis" },
-  { id: "backtest", label: "Backtests", icon: FlaskConical, group: "analysis" },
   { id: "optimizer", label: "Optimiseur", icon: Target, group: "analysis" },
   { id: "learning", label: "Apprentissage", icon: BarChart3, group: "analysis" },
   { id: "smc", label: "SMC / ICT", icon: Target, group: "analysis" },
   { id: "alerts", label: "Alertes", icon: AlertTriangle, group: "tools" },
   { id: "security", label: "Securite", icon: Eye, group: "tools" },
-  { id: "testnet", label: "Testnet", icon: Wifi, group: "tools" },
-  { id: "multi-asset", label: "Multi-Actifs", icon: Globe, group: "tools" },
-  { id: "free-apis", label: "Données Libres", icon: Database, group: "tools" },
   { id: "journal", label: "Journal", icon: BookOpen, group: "tools" },
 ];
 
-const cryptoPrices = [
-  { symbol: "BTC", name: "Bitcoin", color: "#f7931a" },
-  { symbol: "ETH", name: "Ethereum", color: "#627eea" },
-  { symbol: "SOL", name: "Solana", color: "#9945ff" },
+// Was a BTC/ETH/SOL strip reading `${symbol}USDT` snapshots. The dashboard now
+// carries Forex instruments, so this reads the ICT universe instead. Forex
+// quotes are per-unit, not per-thousand, so the k abbreviation is gone.
+const trackedPrices = [
+  { symbol: "EURUSD", name: "EUR/USD" },
+  { symbol: "GBPUSD", name: "GBP/USD" },
+  { symbol: "XAUUSD", name: "Gold" },
 ];
 
 function SidebarContent({
@@ -150,29 +145,24 @@ function SidebarContent({
         ))}
       </nav>
 
-      {/* Crypto Prices */}
+      {/* Tracked instrument prices */}
       {!collapsed && (
         <div className="px-3 py-3 border-t border-border">
           <div className="font-['JetBrains_Mono'] text-[10px] text-muted-foreground/50 tracking-widest mb-2 px-1">
-            PRIX CRYPTO
+            PRIX FOREX
           </div>
           <div className="space-y-1.5">
-            {cryptoPrices.map((c) => {
-              const snapshot = data?.market_snapshots?.find((s) => s.symbol === `${c.symbol}USDT`);
+            {trackedPrices.map((t) => {
+              const snapshot = data?.market_snapshots?.find((s) => s.symbol === t.symbol);
               const price = snapshot?.price;
               return (
-                <div key={c.symbol} className="flex items-center justify-between px-1 py-1.5 rounded-md hover:bg-white/[0.02] transition-colors cursor-default">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold"
-                      style={{ background: `${c.color}22`, color: c.color }}
-                    >
-                      {c.symbol[0]}
-                    </div>
-                    <span className="font-['Inter'] text-[12px] text-foreground">{c.symbol}</span>
-                  </div>
+                <div
+                  key={t.symbol}
+                  className="flex items-center justify-between px-1 py-1.5 rounded-md hover:bg-white/[0.02] transition-colors cursor-default"
+                >
+                  <span className="font-['Inter'] text-[12px] text-foreground">{t.name}</span>
                   <span className="font-['JetBrains_Mono'] text-[12px] text-muted-foreground">
-                    {price ? `$${price >= 1000 ? (price / 1000).toFixed(1) + "k" : price.toFixed(0)}` : "—"}
+                    {price != null ? price.toFixed(t.symbol === "XAUUSD" ? 2 : 5) : "—"}
                   </span>
                 </div>
               );
@@ -258,3 +248,5 @@ function Sidebar({ data, activeSection, onNavigate, collapsed, onToggle, mobileO
 }
 
 export default memo(Sidebar);
+
+

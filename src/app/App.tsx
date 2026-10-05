@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, useNavigate, useLocation, Navigate } from "react-router-dom";
-import { activateEmergencyStop, getAdminToken, getDashboard, getSupervisor, refreshFearGreed, refreshFundingRates, refreshHistory, refreshMarketData, resumeSupervisor, hasAdminToken, clearAdminToken, verifyAdminToken, type DashboardSnapshot, type SupervisorStatus } from "../lib/api";
+import { activateEmergencyStop, getAdminToken, getDashboard, getSupervisor, refreshHistory, refreshMarketData, resumeSupervisor, hasAdminToken, clearAdminToken, verifyAdminToken, type DashboardSnapshot, type SupervisorStatus } from "../lib/api";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import BackToTop from "./components/BackToTop";
 import AdminLogin from "./components/AdminLogin";
@@ -16,12 +16,8 @@ const PortfolioSection = lazy(() => import("./sections/PortfolioSection"));
 const RiskSection = lazy(() => import("./sections/RiskSection"));
 const MLRegimeSection = lazy(() => import("./sections/MLRegimeSection"));
 const AlertsSection = lazy(() => import("./sections/AlertsSection"));
-const AdvancedBacktestSection = lazy(() => import("./sections/AdvancedBacktestSection"));
-const BinanceTestnetSection = lazy(() => import("./sections/BinanceTestnetSection"));
-const MultiAssetSection = lazy(() => import("./sections/MultiAssetSection"));
 const OptimizerSection = lazy(() => import("./sections/OptimizerSection"));
 const AIAnalystSection = lazy(() => import("./sections/AIAnalystSection"));
-const FreeApisSection = lazy(() => import("./sections/FreeApisSection"));
 const JournalSection = lazy(() => import("./sections/JournalSection"));
 const EngineSection = lazy(() => import("./sections/EngineSection"));
 const LearningSection = lazy(() => import("./sections/LearningSection"));
@@ -37,8 +33,8 @@ import {
 } from "lucide-react";
 
 const VALID_SECTIONS = new Set([
-  "overview", "portfolio", "risk", "regime", "ai", "backtest",
-  "optimizer", "alerts", "testnet", "multi-asset", "free-apis", "journal", "engine",
+  "overview", "portfolio", "risk", "regime", "ai",
+  "optimizer", "alerts", "journal", "engine",
   "learning", "positions", "security", "operations", "smc",
 ]);
 
@@ -158,12 +154,8 @@ function DashboardLayout({ onLogout }: { onLogout: () => void }) {
     risk: <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><RiskSection /></Suspense></ErrorBoundary>,
     regime: <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><MLRegimeSection /></Suspense></ErrorBoundary>,
     ai: <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><AIAnalystSection /></Suspense></ErrorBoundary>,
-    backtest: <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><AdvancedBacktestSection /></Suspense></ErrorBoundary>,
     optimizer: <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><OptimizerSection /></Suspense></ErrorBoundary>,
     alerts: <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><AlertsSection /></Suspense></ErrorBoundary>,
-    testnet: <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><BinanceTestnetSection /></Suspense></ErrorBoundary>,
-    "multi-asset": <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><MultiAssetSection /></Suspense></ErrorBoundary>,
-    "free-apis": <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><FreeApisSection /></Suspense></ErrorBoundary>,
     journal: <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><JournalSection /></Suspense></ErrorBoundary>,
     engine: <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><EngineSection onRefresh={refreshDashboard} /></Suspense></ErrorBoundary>,
     learning: <ErrorBoundary><Suspense fallback={<Skeleton className="h-64" />}><LearningSection /></Suspense></ErrorBoundary>,
@@ -254,12 +246,6 @@ function DashboardLayout({ onLogout }: { onLogout: () => void }) {
                 </Button>
                 <Button size="sm" variant="ghost" aria-label="Charger l'historique OHLCV" onClick={() => void runResearchAction("Historique", refreshHistory)} disabled={Boolean(operation)} loading={operation === "Historique"}>
                   OHLCV
-                </Button>
-                <Button size="sm" variant="ghost" aria-label="Rafraîchir le Fear & Greed Index" onClick={() => void runResearchAction("Fear & Greed", refreshFearGreed)} disabled={Boolean(operation)} loading={operation === "Fear & Greed"}>
-                  F&G
-                </Button>
-                <Button size="sm" variant="ghost" aria-label="Rafraîchir les Funding Rates" onClick={() => void runResearchAction("Funding Rate", () => refreshFundingRates())} disabled={Boolean(operation)} loading={operation === "Funding Rate"}>
-                  FUND
                 </Button>
               </div>
 
@@ -379,3 +365,5 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+
+

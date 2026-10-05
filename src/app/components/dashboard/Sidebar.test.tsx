@@ -76,12 +76,15 @@ describe("Sidebar", () => {
     expect(onNavigate).toHaveBeenCalledWith("portfolio");
   });
 
-  it("shows crypto prices section", () => {
+  it("shows the tracked Forex instrument prices", () => {
+    // Was "shows crypto prices section" and asserted BTC/ETH/SOL against
+    // `${symbol}USDT` snapshots. The sidebar now reads the ICT universe, so the
+    // test pins that instead rather than being deleted with the code.
     renderSidebar();
-    expect(screen.getByText("PRIX CRYPTO")).toBeInTheDocument();
-    expect(screen.getByText("BTC")).toBeInTheDocument();
-    expect(screen.getByText("ETH")).toBeInTheDocument();
-    expect(screen.getByText("SOL")).toBeInTheDocument();
+    expect(screen.getByText("PRIX FOREX")).toBeInTheDocument();
+    expect(screen.getByText("EUR/USD")).toBeInTheDocument();
+    expect(screen.getByText("GBP/USD")).toBeInTheDocument();
+    expect(screen.getByText("Gold")).toBeInTheDocument();
   });
 
   it("shows system status", () => {

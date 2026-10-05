@@ -1,16 +1,15 @@
 import { useState, useEffect } from "react";
-import { getAIStatus, aiAnalyzeMarket, aiAssessRisk, aiAnalyzeSentiment, type AIStatus, type AIAnalysis, type AIRiskAssessment, type AISentiment } from "../../lib/api";
-import { Brain, Shield, Eye, RefreshCw } from "lucide-react";
+import { getAIStatus, aiAnalyzeMarket, aiAssessRisk, type AIStatus, type AIAnalysis, type AIRiskAssessment } from "../../lib/api";
+import { Brain, Shield, RefreshCw } from "lucide-react";
 import { DataTimestamp } from "../components/DataTimestamp";
 
 export default function AIAnalystSection() {
   const [aiStatus, setAiStatus] = useState<AIStatus | null>(null);
-  const [analysis, setAnalysis] = useState<AIAnalysis | null>(null);
-  const [riskAssessment, setRiskAssessment] = useState<AIRiskAssessment | null>(null);
-  const [sentiment, setSentiment] = useState<AISentiment | null>(null);
-  const [loading, setLoading] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<AIAnalysis | null>(null);
+  const [riskAssessment, setRiskAssessment] = useState<AIRiskAssessment | null>(null);
 
   const fetchStatus = async () => {
     await getAIStatus().then(setAiStatus).catch(() => setAiStatus(null));
@@ -36,17 +35,14 @@ export default function AIAnalystSection() {
       } else if (type === "risk") {
         const r = await aiAssessRisk();
         setRiskAssessment(r);
-      } else if (type === "sentiment") {
-        const r = await aiAnalyzeSentiment();
-        setSentiment(r);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erreur inconnue";
       if (type === "market") setAnalysis({ error: msg });
       else if (type === "risk") setRiskAssessment({ error: msg });
-      else if (type === "sentiment") setSentiment({ error: msg });
+    } finally {
+      setLoading(null);
     }
-    setLoading(null);
   };
 
   return (
@@ -87,16 +83,9 @@ export default function AIAnalystSection() {
             </div>
             <div className="font-['Inter'] text-xs sm:text-sm text-foreground">{loading === "risk" ? "Évaluation en cours…" : "Évaluer les risques"}</div>
           </button>
-          <button onClick={() => void handleAnalyze("sentiment")} disabled={loading !== null} className="border border-border p-3 sm:p-5 text-left hover:border-primary/30 transition-all disabled:opacity-50" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="flex items-center gap-2 mb-2 sm:mb-3">
-              <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary" />
-              <span className="font-['JetBrains_Mono'] text-[12px] sm:text-xs text-primary">SENTIMENT</span>
-            </div>
-            <div className="font-['Inter'] text-xs sm:text-sm text-foreground">{loading === "sentiment" ? "Analyse en cours…" : "Analyser le sentiment"}</div>
-          </button>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-2 sm:gap-4">
+        <div className="grid lg:grid-cols-2 gap-2 sm:gap-4">
           {/* Market Analysis Result */}
           <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
             <div className="font-['JetBrains_Mono'] text-[12px] sm:text-xs text-primary mb-3 sm:mb-4">ANALYSE MARCHÉ</div>
@@ -131,25 +120,11 @@ export default function AIAnalystSection() {
               <div className="font-['Inter'] text-[12px] sm:text-xs text-muted-foreground/50 py-4 sm:py-6 text-center">Cliquer "RISQUE" pour lancer</div>
             )}
           </div>
-
-          {/* Sentiment Result */}
-          <div className="border border-border p-3 sm:p-5" style={{ background: "rgba(11,18,32,0.7)" }}>
-            <div className="font-['JetBrains_Mono'] text-[12px] sm:text-xs text-primary mb-3 sm:mb-4">SENTIMENT</div>
-            {sentiment?.error ? (
-              <div className="font-['Inter'] text-[12px] sm:text-xs text-red-400">{sentiment.error}</div>
-            ) : sentiment?.overall_sentiment ? (
-              <div className="space-y-2 sm:space-y-3">
-                <div className="flex justify-between"><span className="font-['Inter'] text-[12px] sm:text-xs text-muted-foreground">Global</span><span className="font-['JetBrains_Mono'] text-[12px] sm:text-xs text-primary">{sentiment.overall_sentiment}</span></div>
-                <div className="flex justify-between"><span className="font-['Inter'] text-[12px] sm:text-xs text-muted-foreground">Confiance</span><span className="font-['JetBrains_Mono'] text-[12px] sm:text-xs text-primary">{((sentiment.confidence ?? 0) * 100).toFixed(0)}%</span></div>
-                {sentiment.fear_greed_interpretation && <div className="font-['Inter'] text-[12px] sm:text-xs text-foreground mt-2">{sentiment.fear_greed_interpretation}</div>}
-                {sentiment.volume_analysis && <div className="font-['Inter'] text-[12px] sm:text-[12px] text-muted-foreground/70 mt-1">{sentiment.volume_analysis}</div>}
-              </div>
-            ) : (
-              <div className="font-['Inter'] text-[12px] sm:text-xs text-muted-foreground/50 py-4 sm:py-6 text-center">Cliquer "SENTIMENT" pour lancer</div>
-            )}
-          </div>
         </div>
       </div>
     </section>
   );
 }
+
+
+

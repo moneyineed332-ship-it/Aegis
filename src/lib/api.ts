@@ -78,52 +78,6 @@ export interface SupervisorStatus {
   alerts: Array<{ severity: string; message: string; created_at: string }>;
 }
 
-// --- Free API Types ---
-
-export interface DefillamaChain {
-  name: string;
-  tvl?: number;
-  change_1d?: number;
-  change_7d?: number;
-}
-
-export interface DefillamaProtocol {
-  name: string;
-  slug: string;
-  tvl?: number;
-  chain?: string;
-  category?: string;
-}
-
-export interface PerpFinderOI {
-  symbol: string;
-  open_interest?: number;
-  open_interest_usd?: number;
-}
-
-export interface DexScreenerPair {
-  chainId?: string;
-  dexId?: string;
-  pairAddress?: string;
-  baseToken?: { symbol: string; name: string };
-  quoteToken?: { symbol: string; name: string };
-  priceUsd?: string;
-  volume?: { h24?: number };
-}
-
-export interface FearGreedData {
-  value?: number;
-  value_classification?: string;
-  timestamp?: string;
-}
-
-export interface BlockstreamTx {
-  txid?: string;
-  confirmed?: boolean;
-  fee?: number;
-  weight?: number;
-}
-
 export interface OMSOrder {
   id: number;
   order_id: string;
@@ -140,91 +94,6 @@ export interface OMSOrder {
   reason: string;
   created_at: string;
 }
-
-// Upstream payloads are frequently partial, so the numeric fields are optional
-// and the sections render "—". The property names below mirror free_apis.py.
-export interface CoingeckoGlobal {
-  total_market_cap_usd?: number;
-  total_volume_usd?: number;
-  btc_dominance?: number;
-  eth_dominance?: number;
-  active_cryptos?: number;
-  markets?: number;
-  market_cap_change_24h?: number;
-  error?: string;
-}
-
-export interface CoingeckoTrending {
-  name: string;
-  symbol: string;
-  market_cap_rank?: number;
-  score?: number;
-}
-
-export interface CoingeckoGainerLoser {
-  symbol: string;
-  name: string;
-  price?: number;
-  change_24h?: number;
-  market_cap?: number;
-  volume?: number;
-}
-
-export interface DefillamaTVL {
-  total_tvl?: number;
-  prev_tvl?: number;
-  change_pct?: number;
-  error?: string;
-}
-
-export interface DefillamaYield {
-  pool?: string;
-  project: string;
-  symbol: string;
-  chain?: string;
-  tvl_usd?: number;
-  apy?: number;
-  apy_base?: number;
-  apy_reward?: number;
-  il_risk?: string;
-  stablecoin?: string;
-}
-
-export interface PerpFinderFunding {
-  symbol: string;
-  exchange?: string;
-  rate?: number;
-  rate_annualized?: number;
-  next_funding?: number;
-}
-
-export interface PerpFinderLiquidation {
-  symbol: string;
-  total_24h?: number;
-  longs?: number;
-  shorts?: number;
-  dominant?: string;
-}
-
-export interface MempoolFees {
-  fastest_fee?: number;
-  half_hour_fee?: number;
-  hour_fee?: number;
-  economy_fee?: number;
-  minimum_fee?: number;
-  error?: string;
-}
-
-export interface PolymarketCrypto {
-  question: string;
-  slug?: string;
-  outcomes?: string[];
-  outcome_prices?: string[];
-  volume?: number;
-  liquidity?: number;
-}
-
-// --- AI Types ---
 
 export interface AIStatus {
   available: boolean;
@@ -250,85 +119,6 @@ export interface AIRiskAssessment {
   error?: string;
 }
 
-export interface AISentiment {
-  overall_sentiment?: string;
-  confidence?: number;
-  fear_greed_interpretation?: string;
-  volume_analysis?: string;
-  error?: string;
-}
-
-// --- Multi-Asset Types ---
-
-export interface AssetClassEntry {
-  name: string;
-  symbols: string[];
-  allocation?: number;
-  risk?: string;
-}
-
-export interface AssetClasses {
-  [key: string]: AssetClassEntry;
-}
-
-export interface CommodityPrice {
-  symbol: string;
-  price: number;
-  currency: string;
-  source: string;
-  collected_at: string;
-}
-
-export interface ForexRates {
-  base: string;
-  rates: Record<string, number>;
-  source: string;
-  collected_at: string;
-}
-
-// --- Backtest Types ---
-
-export interface WalkForwardSplit {
-  split: number;
-  train_size: number;
-  test_size: number;
-  best_params: Record<string, number>;
-  best_train_score: number;
-  oos_metrics: { sharpe_ratio: number; total_return: number; max_drawdown: number; trade_count: number };
-  candidates_tested: number;
-}
-
-export interface WalkForwardResult {
-  splits: WalkForwardSplit[];
-  n_splits: number;
-  avg_oos_sharpe: number;
-  avg_oos_return: number;
-  robustness: string;
-  objective: string;
-  symbol: string;
-  interval: string;
-}
-
-export interface MonteCarloResult {
-  n_simulations: number;
-  base_metrics: Record<string, number>;
-  return_distribution: {
-    mean: number;
-    std: number;
-    percentiles: Record<string, number>;
-  };
-  drawdown_distribution: {
-    mean: number;
-    worst: number;
-    percentiles: Record<string, number>;
-  };
-  probability_of_profit: number;
-  probability_of_ruin: number;
-  expected_final_equity: number;
-  symbol: string;
-  interval: string;
-}
-
 export interface BacktestMetrics {
   total_return: number;
   max_drawdown: number;
@@ -339,21 +129,6 @@ export interface BacktestMetrics {
   win_rate: number;
   profit_factor: number;
 }
-
-// --- Binance Testnet Types ---
-
-export interface BinanceTestnetStatus {
-  connected: boolean;
-  testnet: boolean;
-  has_keys: boolean;
-  btc_price?: string;
-}
-
-export interface BinanceTestnetPrice {
-  symbol: string;
-  price: string;
-}
-
 // --- Optimizer Types ---
 
 export interface OptimizerRankingItem {
@@ -527,7 +302,7 @@ export async function postApi<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export const refreshMarketData = () => postApi("/api/v1/market-snapshots/refresh");
-export const refreshHistory = () => postApi("/api/v1/ohlcv/refresh-history?symbol=BTCUSDT&interval=1h&batches=4");
+export const refreshHistory = () => postApi("/api/v1/ohlcv/refresh-history?symbol=EURUSD&interval=1h&batches=4");
 export const runSmaWalkForward = () => postApi("/api/v1/backtests/sma-crossover/walk-forward");
 export const runDonchianWalkForward = () => postApi("/api/v1/backtests/donchian-breakout/walk-forward");
 export const getSupervisor = async (): Promise<SupervisorStatus> => {
@@ -535,11 +310,6 @@ export const getSupervisor = async (): Promise<SupervisorStatus> => {
 };
 export const activateEmergencyStop = () => postApi("/api/v1/supervisor/emergency-stop");
 export const resumeSupervisor = () => postApi("/api/v1/supervisor/resume");
-export const runMeanReversionWalkForward = () => postApi("/api/v1/backtests/mean-reversion/walk-forward");
-export const runGridWalkForward = () => postApi("/api/v1/backtests/grid/walk-forward");
-export const refreshFearGreed = () => postApi("/api/v1/fear-greed/refresh");
-export const refreshFundingRates = (symbol: string = "BTCUSDT") => postApi(`/api/v1/funding-rates/refresh?symbol=${symbol}`);
-export const refreshOpenInterest = (symbol: string = "BTCUSDT") => postApi(`/api/v1/open-interest/refresh?symbol=${symbol}`);
 
 // Phase 4: Alerts
 export interface Alert {
@@ -559,15 +329,6 @@ export const getAlertThresholds = async () => {
 export const checkAlerts = () => postApi<{ alerts: Alert[] }>("/api/v1/alerts/check");
 
 // Phase 4: Advanced Backtesting
-export const runAdvancedWalkForward = (symbol: string = "BTCUSDT", nSplits: number = 3) =>
-  postApi<WalkForwardResult>(`/api/v1/backtests/advanced/walk-forward?symbol=${symbol}&n_splits=${nSplits}`);
-export const runMonteCarlo = (symbol: string = "BTCUSDT", nSimulations: number = 1000) =>
-  postApi<MonteCarloResult>(`/api/v1/backtests/advanced/monte-carlo?symbol=${symbol}&n_simulations=${nSimulations}`);
-export const runSensitivity = (symbol: string = "BTCUSDT", paramName: string = "fast_period") =>
-  postApi(`/api/v1/backtests/advanced/sensitivity?symbol=${symbol}&param_name=${paramName}`);
-
-// SMC/ICT + Multi-Timeframe backtests
-// These three endpoints take a Pydantic request BODY, not query params.
 export const runSmcIctBacktest = (symbol: string = "EURUSD", interval: "1h" | "4h" = "1h") =>
   postApi("/api/v1/backtests/smc-ict", { symbol, interval });
 export const runMultiTimeframeBacktest = (symbol: string = "EURUSD", interval: "1h" | "4h" = "1h") =>
@@ -576,9 +337,9 @@ export const runMultiScaleCrossoverBacktest = (symbol: string = "EURUSD", interv
   postApi("/api/v1/backtests/multi-scale-crossover", { symbol, interval });
 
 // SMC/ICT + Multi-Timeframe walk-forward
-export const runSmcIctWalkForward = (symbol: string = "BTCUSDT") =>
+export const runSmcIctWalkForward = (symbol: string = "EURUSD") =>
   postApi(`/api/v1/backtests/smc-ict/walk-forward?symbol=${symbol}`);
-export const runMultiTimeframeWalkForward = (symbol: string = "BTCUSDT") =>
+export const runMultiTimeframeWalkForward = (symbol: string = "EURUSD") =>
   postApi(`/api/v1/backtests/multi-timeframe/walk-forward?symbol=${symbol}`);
 
 // Phase 4: ML Regime
@@ -605,9 +366,9 @@ export interface MLRegimePrediction {
   agreement: boolean;
 }
 
-export const trainMLRegime = (symbol: string = "BTCUSDT", epochs: number = 200) =>
+export const trainMLRegime = (symbol: string = "EURUSD", epochs: number = 200) =>
   postApi(`/api/v1/ml/regime/train?symbol=${symbol}&epochs=${epochs}`);
-export const predictRegime = async (symbol: string = "BTCUSDT"): Promise<MLRegimePrediction> => {
+export const predictRegime = async (symbol: string = "EURUSD"): Promise<MLRegimePrediction> => {
   return apiGet<MLRegimePrediction>(`/api/v1/ml/regime/predict?symbol=${symbol}`);
 };
 export const getMLRegimeSummary = async (): Promise<MLRegimeSummary> => {
@@ -615,90 +376,14 @@ export const getMLRegimeSummary = async (): Promise<MLRegimeSummary> => {
 };
 
 // Phase 4: Binance Testnet
-export const getBinanceTestnetStatus = async (): Promise<BinanceTestnetStatus> => {
-  return apiGet<BinanceTestnetStatus>("/api/v1/binance/testnet/status");
-};
-export const getBinanceTestnetPrice = async (symbol: string = "BTCUSDT") => {
-  return apiGet<BinanceTestnetPrice>(`/api/v1/binance/testnet/price?symbol=${symbol}`);
-};
-
-// Phase 4: Multi-Asset
-export const getAssetClasses = async () => {
-  return apiGet<Record<string, { name: string; symbols: string[] }>>("/api/v1/assets/classes");
-};
-export const getSupportedSymbols = async (): Promise<string[]> => {
-  return apiGet<string[]>("/api/v1/assets/symbols");
-};
-export const getForexRates = async (base: string = "USD") => {
-  return apiGet<ForexRates>(`/api/v1/assets/forex?base=${base}`);
-};
-export const getCommodityPrices = async () => {
-  return apiGet<CommodityPrice[]>("/api/v1/assets/commodities");
-};
-
 // Phase 5: AI Analyst
 export const getAIStatus = async () => {
   return apiGet<{ available: boolean; providers: Record<string, { available: boolean; model: string | null }>; provider: string; note: string }>("/api/v1/ai/status");
 };
-export const aiAnalyzeMarket = (symbol: string = "BTCUSDT", interval: string = "1h") =>
+export const aiAnalyzeMarket = (symbol: string = "EURUSD", interval: string = "1h") =>
   postApi<AIAnalysis>(`/api/v1/ai/analyze-market?symbol=${symbol}&interval=${interval}`);
-export const aiAssessRisk = (symbol: string = "BTCUSDT", interval: string = "1h") =>
+export const aiAssessRisk = (symbol: string = "EURUSD", interval: string = "1h") =>
   postApi<AIRiskAssessment>(`/api/v1/ai/assess-risk?symbol=${symbol}&interval=${interval}`);
-export const aiReviewStrategies = () => postApi<Record<string, unknown>>("/api/v1/ai/review-strategies");
-export const aiAnalyzeSentiment = () => postApi<AISentiment>("/api/v1/ai/analyze-sentiment");
-
-// Phase 5: Free APIs
-export const getCoingeckoGlobal = async () => {
-  return apiGet<CoingeckoGlobal>("/api/v1/free/coingecko/global");
-};
-export const getCoingeckoTrending = async () => {
-  return apiGet<CoingeckoTrending[]>("/api/v1/free/coingecko/trending");
-};
-export const getCoingeckoGainers = async () => {
-  return apiGet<CoingeckoGainerLoser[]>("/api/v1/free/coingecko/gainers");
-};
-export const getCoingeckoLosers = async () => {
-  return apiGet<CoingeckoGainerLoser[]>("/api/v1/free/coingecko/losers");
-};
-export const getDefillamaTVL = async () => {
-  return apiGet<DefillamaTVL>("/api/v1/free/defillama/tvl");
-};
-export const getDefillamaChains = async () => {
-  return apiGet<DefillamaChain[]>("/api/v1/free/defillama/chains");
-};
-export const getDefillamaProtocols = async () => {
-  return apiGet<DefillamaProtocol[]>("/api/v1/free/defillama/protocols");
-};
-export const getDefillamaYields = async () => {
-  return apiGet<DefillamaYield[]>("/api/v1/free/defillama/yields");
-};
-export const getPerpFinderFunding = async () => {
-  return apiGet<PerpFinderFunding[]>("/api/v1/free/perpfinder/funding");
-};
-export const getPerpFinderOI = async () => {
-  return apiGet<PerpFinderOI[]>("/api/v1/free/perpfinder/open-interest");
-};
-export const getPerpFinderLiquidations = async () => {
-  return apiGet<PerpFinderLiquidation[]>("/api/v1/free/perpfinder/liquidations");
-};
-export const getMempoolFees = async () => {
-  return apiGet<MempoolFees>("/api/v1/free/mempool/fees");
-};
-export const getDexScreenerTrending = async () => {
-  return apiGet<DexScreenerPair[]>("/api/v1/free/dexscreener/trending");
-};
-export const getPolymarketCrypto = async () => {
-  return apiGet<PolymarketCrypto[]>("/api/v1/free/polymarket/crypto");
-};
-export const getFearGreedHistorical = async (limit: number = 30) => {
-  return apiGet<FearGreedData[]>(`/api/v1/free/fear-greed/historical?limit=${limit}`);
-};
-export const getBlockstream = async () => {
-  return apiGet<BlockstreamTx>("/api/v1/free/blockstream");
-};
-export const getFreeAllData = async () => {
-  return apiGet<Record<string, unknown>>("/api/v1/free/all");
-};
 
 export interface EngineStatus {
   status: "running" | "stopped";
@@ -1037,3 +722,6 @@ export interface ManualOrderRequest {
 export const placeManualOrder = async (order: ManualOrderRequest) => {
   return postApi<Record<string, unknown>>("/api/v1/orders/manual", order);
 };
+
+
+
